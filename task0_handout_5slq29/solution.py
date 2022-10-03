@@ -44,6 +44,14 @@ def log_posterior_probs(x):
 
     # TODO: enter your code here
 
+    log_prior = np.log(PRIOR_PROBS)
+
+    log_likelihood = np.array([])
+    for dist in HYPOTHESIS_SPACE:
+        log_likelihood = np.append(log_likelihood, np.sum(dist.logpdf(x)))
+
+    log_p = log_likelihood + log_prior - logsumexp( log_prior + log_likelihood )
+
     assert log_p.shape == (3,)
     return log_p
 
