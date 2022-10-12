@@ -40,7 +40,7 @@ class Model(object):
         # TODO: Add custom initialization for your model here if necessary
 
     def make_predictions(
-        self, test_features: np.ndarray, add_constant=0
+        self, test_features: np.ndarray, add_constant=2.2
     ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Predict the pollution concentration for a given set of locations.
@@ -64,13 +64,13 @@ class Model(object):
 
     def fitting_model(
         self,
-        train_GT: np.ndarray,
-        train_features: np.ndarray,
-        noise_level=1e-05,
+        train_GT, 
+        train_features,         
+        sample_size = 3000,
         length_scale=1.0,
         alpha=1.0,
         length_scale_bounds=(1e-05, 100000.0),
-        alpha_bounds=(1e-05, 100000.0),
+        alpha_bounds=(1e-05, 100000.0)
     ):
         """
         Fit your model on the given training data.
@@ -80,7 +80,7 @@ class Model(object):
         curr_time = time.time()
 
         indices = np.arange(train_GT.size)
-        sample_size = 1500
+        sample_size = sample_size
         samples = np.random.choice(indices, size=sample_size, replace=False)
         select_train_feat = train_features[samples]
         select_train_labels = train_GT[samples]
@@ -93,7 +93,7 @@ class Model(object):
             alpha=alpha,
             length_scale_bounds=length_scale_bounds,
             alpha_bounds=alpha_bounds,
-        ) + ker.WhiteKernel(noise_level=noise_level)
+        )
 
         self.gpr = GaussianProcessRegressor(kernel=kernel, random_state=0).fit(
             select_train_feat, select_train_labels
@@ -203,7 +203,7 @@ def main():
     train_GT = np.loadtxt(dir_path + "/train_y.csv", delimiter=",", skiprows=1)
     test_features = np.loadtxt(dir_path + "/test_x.csv", delimiter=",", skiprows=1)
 
-    print("ground truth parameters", train_GT.min(), train_GT.max(), train_GT.mean())
+    print("ground truth parameters",train_GT.min(), train_GT.max(), train_GT.mean())
 
     # Fit the model
     print("Fitting model")
@@ -212,10 +212,12 @@ def main():
 
     # Predict on the test features
     print("Predicting on test features")
-    predictions, gp_mean, gp_std = model.make_predictions(test_features)
+    const = 2.2
+
+    predictions, gp_mean, gp_std = model.make_predictions(test_features, add_constant=const)
     print(predictions, predictions.min(), predictions.max())
 
-    cost_of_pred = cost_function(train_GT, model.make_predictions(train_features)[0])
+    cost_of_pred = cost_function(train_GT, model.make_predictions(train_features, add_constant=const)[0])
     print(cost_of_pred)
 
     if EXTENDED_EVALUATION:
