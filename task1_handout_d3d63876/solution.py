@@ -55,6 +55,8 @@ class Model(object):
         #predictions = gp_mean
         predictions, gp_std = self.gpr.predict(test_features, return_std=True)
 
+        predictions += 10
+
         return predictions, gp_mean, gp_std
 
     def fitting_model(self, train_GT: np.ndarray, train_features: np.ndarray):
@@ -63,9 +65,10 @@ class Model(object):
         :param train_features: Training features as a 2d NumPy float array of shape (NUM_SAMPLES, 2)
         :param train_GT: Training pollution concentrations as a 1d NumPy float array of shape (NUM_SAMPLES,)
         """
+        time = time.time()
 
         indices = np.arange(train_GT.size)
-        sample_size = 6000
+        sample_size = 1500
         samples = np.random.choice(indices, size=sample_size, replace=False)
         select_train_feat = train_features[samples]
         select_train_labels = train_GT[samples]
@@ -73,7 +76,7 @@ class Model(object):
         # TODO: Fit your model here
         kernel = ker.Matern(length_scale=0.01, nu=2.5) + ker.WhiteKernel(noise_level=1e-05)
         self.gpr = GaussianProcessRegressor(kernel=kernel, random_state=0).fit(select_train_feat, select_train_labels)
-        #return gpr
+        print("fit runtime : ", time.time()-time)
 
 
 def cost_function(ground_truth: np.ndarray, predictions: np.ndarray) -> float:
@@ -178,6 +181,7 @@ def main():
     train_GT = np.loadtxt(dir_path + "/train_y.csv", delimiter=",", skiprows=1)
     test_features = np.loadtxt(dir_path + "/test_x.csv", delimiter=",", skiprows=1)
 
+    print("ground truth parameters",train_GT.min(), train_GT.max(), train_GT.mean())
 
     # Fit the model
     print("Fitting model")
@@ -186,8 +190,8 @@ def main():
 
     # Predict on the test features
     print("Predicting on test features")
-    predictions = model.make_predictions(test_features)
-    print(predictions)
+    predictions, gp_mean, gp_std = model.make_predictions(test_features)
+    print(predictions, predictions.min(), predictions.max())
 
     cost_of_pred = cost_function(train_GT, model.make_predictions(train_features)[0])
     print(cost_of_pred)
