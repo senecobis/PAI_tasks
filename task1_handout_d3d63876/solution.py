@@ -2,11 +2,13 @@ import os
 import typing
 import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor
-#from sklearn.gaussian_process.kernels import *
+
+# from sklearn.gaussian_process.kernels import *
 import sklearn.gaussian_process.kernels as ker
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import random
+import time
 
 
 # Set `EXTENDED_EVALUATION` to `True` in order to visualize your predictions.
@@ -38,7 +40,7 @@ class Model(object):
         # TODO: Add custom initialization for your model here if necessary
 
     def make_predictions(
-        self, test_features: np.ndarray
+        self, test_features: np.ndarray, add_constant=2.2
     ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Predict the pollution concentration for a given set of locations.
@@ -52,31 +54,51 @@ class Model(object):
         gp_mean = np.mean(test_features)
 
         # TODO: Use the GP posterior to form your predictions here
-        #predictions = gp_mean
+        # predictions = gp_mean
         predictions, gp_std = self.gpr.predict(test_features, return_std=True)
 
-        predictions += 10
+        # predictions += 0.5
+        predictions += add_constant
 
         return predictions, gp_mean, gp_std
 
-    def fitting_model(self, train_GT: np.ndarray, train_features: np.ndarray):
+    def fitting_model(
+        self,
+        train_GT, 
+        train_features,         
+        sample_size = 3000,
+        length_scale=1.0,
+        alpha=1.0,
+        length_scale_bounds=(1e-05, 100000.0),
+        alpha_bounds=(1e-05, 100000.0)
+    ):
         """
         Fit your model on the given training data.
         :param train_features: Training features as a 2d NumPy float array of shape (NUM_SAMPLES, 2)
         :param train_GT: Training pollution concentrations as a 1d NumPy float array of shape (NUM_SAMPLES,)
         """
-        time = time.time()
+        curr_time = time.time()
 
         indices = np.arange(train_GT.size)
-        sample_size = 1500
+        sample_size = sample_size
         samples = np.random.choice(indices, size=sample_size, replace=False)
         select_train_feat = train_features[samples]
         select_train_labels = train_GT[samples]
 
         # TODO: Fit your model here
-        kernel = ker.Matern(length_scale=0.01, nu=2.5) + ker.WhiteKernel(noise_level=1e-05)
-        self.gpr = GaussianProcessRegressor(kernel=kernel, random_state=0).fit(select_train_feat, select_train_labels)
-        print("fit runtime : ", time.time()-time)
+        # kernel = ker.Matern(length_scale=0.001, nu=5) + ker.WhiteKernel(noise_level=1e-05)
+
+        kernel = ker.RationalQuadratic(
+            length_scale=length_scale,
+            alpha=alpha,
+            length_scale_bounds=length_scale_bounds,
+            alpha_bounds=alpha_bounds,
+        )
+
+        self.gpr = GaussianProcessRegressor(kernel=kernel, random_state=0).fit(
+            select_train_feat, select_train_labels
+        )
+        print("fit runtime : ", time.time() - curr_time)
 
 
 def cost_function(ground_truth: np.ndarray, predictions: np.ndarray) -> float:
@@ -190,10 +212,12 @@ def main():
 
     # Predict on the test features
     print("Predicting on test features")
-    predictions, gp_mean, gp_std = model.make_predictions(test_features)
+    const = 2.2
+
+    predictions, gp_mean, gp_std = model.make_predictions(test_features, add_constant=const)
     print(predictions, predictions.min(), predictions.max())
 
-    cost_of_pred = cost_function(train_GT, model.make_predictions(train_features)[0])
+    cost_of_pred = cost_function(train_GT, model.make_predictions(train_features, add_constant=const)[0])
     print(cost_of_pred)
 
     if EXTENDED_EVALUATION:
