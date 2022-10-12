@@ -1,10 +1,12 @@
 import os
 import typing
-from sklearn.gaussian_process.kernels import *
 import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor
+#from sklearn.gaussian_process.kernels import *
+import sklearn.gaussian_process.kernels as ker
 import matplotlib.pyplot as plt
 from matplotlib import cm
+import random
 
 
 # Set `EXTENDED_EVALUATION` to `True` in order to visualize your predictions.
@@ -47,11 +49,13 @@ class Model(object):
         """
 
         # TODO: Use your GP to estimate the posterior mean and stddev for each location here
-        gp_mean = np.zeros(test_features.shape[0], dtype=float)
-        gp_std = np.zeros(test_features.shape[0], dtype=float)
+        gp_mean = np.mean(test_features)
 
         # TODO: Use the GP posterior to form your predictions here
-        predictions = gp_mean
+        #predictions = gp_mean
+        predictions, gp_std = self.gpr.predict(test_features, return_std=True)
+
+        predictions += 10
 
         return predictions, gp_mean, gp_std
 
@@ -61,9 +65,18 @@ class Model(object):
         :param train_features: Training features as a 2d NumPy float array of shape (NUM_SAMPLES, 2)
         :param train_GT: Training pollution concentrations as a 1d NumPy float array of shape (NUM_SAMPLES,)
         """
+        time = time.time()
+
+        indices = np.arange(train_GT.size)
+        sample_size = 1500
+        samples = np.random.choice(indices, size=sample_size, replace=False)
+        select_train_feat = train_features[samples]
+        select_train_labels = train_GT[samples]
 
         # TODO: Fit your model here
-        pass
+        kernel = ker.Matern(length_scale=0.01, nu=2.5) + ker.WhiteKernel(noise_level=1e-05)
+        self.gpr = GaussianProcessRegressor(kernel=kernel, random_state=0).fit(select_train_feat, select_train_labels)
+        print("fit runtime : ", time.time()-time)
 
 
 def cost_function(ground_truth: np.ndarray, predictions: np.ndarray) -> float:
@@ -168,19 +181,23 @@ def main():
     train_GT = np.loadtxt(dir_path + "/train_y.csv", delimiter=",", skiprows=1)
     test_features = np.loadtxt(dir_path + "/test_x.csv", delimiter=",", skiprows=1)
 
+    print("ground truth parameters",train_GT.min(), train_GT.max(), train_GT.mean())
 
     # Fit the model
-    #print("Fitting model")
-    #model = Model()
-    #model.fitting_model(train_GT, train_features)
+    print("Fitting model")
+    model = Model()
+    model.fitting_model(train_GT, train_features)
 
     # Predict on the test features
-    #print("Predicting on test features")
-    #predictions = model.make_predictions(test_features)
-    #print(predictions)
+    print("Predicting on test features")
+    predictions, gp_mean, gp_std = model.make_predictions(test_features)
+    print(predictions, predictions.min(), predictions.max())
 
-    #if EXTENDED_EVALUATION:
-    #    perform_extended_evaluation(model, output_dir=".")
+    cost_of_pred = cost_function(train_GT, model.make_predictions(train_features)[0])
+    print(cost_of_pred)
+
+    if EXTENDED_EVALUATION:
+        perform_extended_evaluation(model, output_dir=".")
 
 
 if __name__ == "__main__":
