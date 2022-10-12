@@ -65,7 +65,7 @@ class Model(object):
         """
 
         indices = np.arange(train_GT.size)
-        sample_size = 1500
+        sample_size = 6000
         samples = np.random.choice(indices, size=sample_size, replace=False)
         select_train_feat = train_features[samples]
         select_train_labels = train_GT[samples]
@@ -188,6 +188,9 @@ def main():
     print("Predicting on test features")
     predictions = model.make_predictions(test_features)
     print(predictions)
+
+    cost_of_pred = cost_function(train_GT, model.make_predictions(train_features)[0])
+    print(cost_of_pred)
 
     if EXTENDED_EVALUATION:
         perform_extended_evaluation(model, output_dir=".")
