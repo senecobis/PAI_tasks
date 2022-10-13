@@ -66,7 +66,6 @@ class Model(object):
         self,
         train_GT, 
         train_features,         
-        sample_size = 3000,
         length_scale=1.0,
         alpha=1.0,
         length_scale_bounds=(1e-05, 100000.0),
@@ -79,11 +78,13 @@ class Model(object):
         """
         curr_time = time.time()
 
-        indices = np.arange(train_GT.size)
-        sample_size = sample_size
-        samples = np.random.choice(indices, size=sample_size, replace=False)
-        select_train_feat = train_features[samples]
-        select_train_labels = train_GT[samples]
+        #àindices = np.arange(train_GT.size)
+        #sample_size = sample_size
+        #samples = np.random.choice(indices, size=indices.shape, replace=False)
+        #select_train_feat = train_features[samples]
+        #select_train_labels = train_GT[samples]
+        select_train_feat = train_features
+        select_train_labels = train_GT
 
         # TODO: Fit your model here
         # kernel = ker.Matern(length_scale=0.001, nu=5) + ker.WhiteKernel(noise_level=1e-05)
