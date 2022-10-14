@@ -7,8 +7,9 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 import sklearn.gaussian_process.kernels as ker
 import matplotlib.pyplot as plt
 from matplotlib import cm
-import random
 import time
+from collections import defaultdict
+from random import sample
 
 
 # Set `EXTENDED_EVALUATION` to `True` in order to visualize your predictions.
@@ -39,6 +40,29 @@ class Model(object):
 
         # TODO: Add custom initialization for your model here if necessary
 
+    def sample_grid(self, X, Y, Z, rows=5, cols=5, max_points_per_cell=100):
+        x_bound = [min(X), max(X)]
+        y_bound = [min(Y), max(Y)]
+
+        res_x = (x_bound[1] - x_bound[0]) / cols
+        res_y = (y_bound[1] - y_bound[0]) / rows
+        LUT_data = defaultdict(lambda: list())
+        for idx, z in enumerate(Z):
+            x = X[idx]
+            y = Y[idx]
+            col = x // res_x
+            row = y // res_y
+            LUT_data[(row, col)].append((x, y, z))
+
+        sampled_points = []
+        for r in range(rows):
+            for c in range(cols):
+                points = LUT_data[(r, c)]
+                sampled_points.extend(
+                    sample(points, k=min(max_points_per_cell, len(points)))
+                )
+        return np.array(sampled_points)
+
     def make_predictions(
         self, test_features: np.ndarray, add_constant=2.2
     ) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -54,22 +78,23 @@ class Model(object):
         gp_mean = np.mean(test_features)
 
         # TODO: Use the GP posterior to form your predictions here
-        # predictions = gp_mean
         predictions, gp_std = self.gpr.predict(test_features, return_std=True)
 
-        # predictions += 0.5
         predictions += add_constant
 
         return predictions, gp_mean, gp_std
 
     def fitting_model(
         self,
-        train_GT, 
-        train_features,         
+        train_GT,
+        train_features,
         length_scale=1.0,
         alpha=1.0,
         length_scale_bounds=(1e-05, 100000.0),
-        alpha_bounds=(1e-05, 100000.0)
+        alpha_bounds=(1e-05, 100000.0),
+        tot_points=3000,
+        rows=20,
+        cols=20,
     ):
         """
         Fit your model on the given training data.
@@ -78,17 +103,23 @@ class Model(object):
         """
         curr_time = time.time()
 
-        #àindices = np.arange(train_GT.size)
-        #sample_size = sample_size
-        #samples = np.random.choice(indices, size=indices.shape, replace=False)
-        #select_train_feat = train_features[samples]
-        #select_train_labels = train_GT[samples]
-        select_train_feat = train_features
-        select_train_labels = train_GT
+        train_lon = train_features[:, 0]
+        train_lat = train_features[:, 1]
+        max_points_cell = tot_points // (rows * cols)
+
+        sampled_points = self.sample_grid(
+            train_lon,
+            train_lat,
+            train_GT,
+            rows=rows,
+            cols=cols,
+            max_points_per_cell=max_points_cell,
+        )
+
+        select_train_feat = sampled_points[..., 0:2]
+        select_train_labels = sampled_points[:, 2]
 
         # TODO: Fit your model here
-        # kernel = ker.Matern(length_scale=0.001, nu=5) + ker.WhiteKernel(noise_level=1e-05)
-
         kernel = ker.RationalQuadratic(
             length_scale=length_scale,
             alpha=alpha,
@@ -204,7 +235,7 @@ def main():
     train_GT = np.loadtxt(dir_path + "/train_y.csv", delimiter=",", skiprows=1)
     test_features = np.loadtxt(dir_path + "/test_x.csv", delimiter=",", skiprows=1)
 
-    print("ground truth parameters",train_GT.min(), train_GT.max(), train_GT.mean())
+    print("ground truth parameters", train_GT.min(), train_GT.max(), train_GT.mean())
 
     # Fit the model
     print("Fitting model")
@@ -213,12 +244,11 @@ def main():
 
     # Predict on the test features
     print("Predicting on test features")
-    const = 2.2
 
-    predictions, gp_mean, gp_std = model.make_predictions(test_features, add_constant=const)
+    predictions, gp_mean, gp_std = model.make_predictions(test_features)
     print(predictions, predictions.min(), predictions.max())
 
-    cost_of_pred = cost_function(train_GT, model.make_predictions(train_features, add_constant=const)[0])
+    cost_of_pred = cost_function(train_GT, model.make_predictions(train_features)[0])
     print(cost_of_pred)
 
     if EXTENDED_EVALUATION:
