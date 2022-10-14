@@ -92,7 +92,7 @@ class Model(object):
         alpha=2.0,
         length_scale_bounds=(1e-05, 100000.0),
         alpha_bounds=(1e-05, 100000.0),
-        tot_points=1000,
+        tot_points=10000,
         rows=20,
         cols=20,
     ):
