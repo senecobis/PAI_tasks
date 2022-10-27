@@ -88,11 +88,11 @@ class Model(object):
         self,
         train_GT,
         train_features,
-        length_scale=1.0,
-        alpha=1.0,
+        length_scale=0.09,
+        alpha=2.0,
         length_scale_bounds=(1e-05, 100000.0),
         alpha_bounds=(1e-05, 100000.0),
-        tot_points=3000,
+        tot_points=10000,
         rows=20,
         cols=20,
     ):
@@ -127,9 +127,10 @@ class Model(object):
             alpha_bounds=alpha_bounds,
         )
 
-        self.gpr = GaussianProcessRegressor(kernel=kernel, random_state=0).fit(
-            select_train_feat, select_train_labels
-        )
+        print("fitting model")
+        self.gpr = GaussianProcessRegressor(
+            kernel=kernel, alpha=0.01, n_restarts_optimizer=50, random_state=0
+        ).fit(select_train_feat, select_train_labels)
         print("fit runtime : ", time.time() - curr_time)
 
 
