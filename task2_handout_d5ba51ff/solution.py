@@ -205,11 +205,11 @@ class DummyTrainer(Framework):
         self.num_epochs = 100
 
 
-        self.network = MNISTNet(in_features=28*28,out_features=10)
+        self.network = MNISTNet(in_features=28*28,out_features=10, dropout_p=0.4, dropout_at_eval=True)
         self.train_loader = torch.utils.data.DataLoader(
             dataset_train, batch_size=self.batch_size, shuffle=True, drop_last=True
             )
-        self.optimizer = torch.optim.Adam(self.network.parameters(), lr=self.learning_rate) 
+        self.optimizer = torch.optim.Adam(self.network.parameters(), lr=self.learning_rate, weight_decay=0.2) 
         
     def train(self):
         self.network.train()
@@ -945,11 +945,11 @@ def evaluate(model:Framework, eval_loader: torch.utils.data.DataLoader, data_dir
 
 
 def main():
-    raise RuntimeError(
-        'This main method is for illustrative purposes only and will NEVER be called by the checker!\n'
-        'The checker always calls run_solution directly.\n'
-        'Please implement your solution exclusively in the methods and classes mentioned in the task description.'
-    )
+    # raise RuntimeError(
+    #     'This main method is for illustrative purposes only and will NEVER be called by the checker!\n'
+    #     'The checker always calls run_solution directly.\n'
+    #     'Please implement your solution exclusively in the methods and classes mentioned in the task description.'
+    # )
 
     # Load training data
     data_dir = os.curdir
