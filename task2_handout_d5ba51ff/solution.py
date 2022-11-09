@@ -203,7 +203,7 @@ class DropoutTrainer(Framework):
         # Hyperparameters and general parameters
         self.batch_size = 128
         self.learning_rate = 1.1e-3
-        self.num_epochs = 40
+        self.num_epochs = 20
 
 
         self.network = MNISTNet(in_features=28*28, out_features=10, dropout_p=0.4, dropout_at_eval=True)
