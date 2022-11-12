@@ -205,7 +205,6 @@ class DropoutTrainer(Framework):
         self.learning_rate = 1.1e-3
         self.num_epochs = 20
 
-
         self.network = MNISTNet(in_features=28*28, out_features=10, dropout_p=0.4, dropout_at_eval=True)
         self.train_loader = torch.utils.data.DataLoader(
             dataset_train, batch_size=self.batch_size, shuffle=True, drop_last=True
