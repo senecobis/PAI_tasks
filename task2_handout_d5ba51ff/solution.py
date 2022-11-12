@@ -43,11 +43,12 @@ def run_solution(dataset_train: torch.utils.data.Dataset, data_dir: str = os.cur
 
     # TODO: Combined model_1: Choose if you want to combine with multiple methods or not
     combined_model = False
+    torch.manual_seed(0)
 
     if not combined_model:
         
         # TODO General_1: Choose your approach here
-        approach = Approach.Dummy_Trainer
+        approach = Approach.MCDropout
 
         if approach == Approach.Dummy_Trainer:
             trainer = DummyTrainer(dataset_train=dataset_train)
@@ -189,7 +190,7 @@ def combined_predict(data_loader: torch.utils.data.DataLoader, models_list: list
     return output
 
 
-class DummyTrainer(Framework):
+class DropoutTrainer(Framework):
     """
     Trainer implementing a simple feedforward neural network.
     You can learn how to build your own trainer and use this model as a reference/baseline for 
@@ -201,11 +202,10 @@ class DummyTrainer(Framework):
 
         # Hyperparameters and general parameters
         self.batch_size = 128
-        self.learning_rate = 1e-3
-        self.num_epochs = 100
+        self.learning_rate = 1.1e-3
+        self.num_epochs = 20
 
-
-        self.network = MNISTNet(in_features=28*28,out_features=10, dropout_p=0.4, dropout_at_eval=True)
+        self.network = MNISTNet(in_features=28*28, out_features=10, dropout_p=0.4, dropout_at_eval=True)
         self.train_loader = torch.utils.data.DataLoader(
             dataset_train, batch_size=self.batch_size, shuffle=True, drop_last=True
             )
@@ -259,28 +259,49 @@ class MNISTNet(nn.Module):
         super().__init__()
         # TODO General_2: Play around with the network structure.
         # You could change the depth or width of the model
-        self.layer1 = nn.Linear(in_features,100)
-        self.layer2 = nn.Linear(100, 100)
-        self.layer3 = nn.Linear(100, out_features)
+        self.classes = out_features
+        self.layer1 = nn.Linear(in_features,400)
+        self.layer2 = nn.Linear(400, 400)
+        self.layer3 = nn.Linear(400, out_features)
         self.dropout_p = dropout_p
         self.dropout_at_eval = dropout_at_eval
 
-    def forward(self, x):
+    def forward(self, x, repeat=20):
         # TODO General_2: Play around with the network structure
-        # You might add different modules like Pooling 
-        x = F.dropout(
+        # You might add different modules like Pooling
+        class_probs = np.zeros(self.classes)
+
+        if self.training:
+            repeat = 0
+
+        y = F.dropout(
                 F.relu(self.layer1(x)),
                 p=self.dropout_p,
                 training=self.training or self.dropout_at_eval
         )
-        x = F.dropout(
-                F.relu(self.layer2(x)),
+        y = F.dropout(
+                F.relu(self.layer2(y)),
                 p=self.dropout_p,
                 training=self.training or self.dropout_at_eval
         )
 
-        class_probs = self.layer3(x)
-        return class_probs
+        class_probs = self.layer3(y)
+
+        for _ in range(repeat):
+            y = F.dropout(
+                F.relu(self.layer1(x)),
+                p=self.dropout_p,
+                training=self.training or self.dropout_at_eval
+            )
+            y = F.dropout(
+                    F.relu(self.layer2(y)),
+                    p=self.dropout_p,
+                    training=self.training or self.dropout_at_eval
+            )
+
+            class_probs += self.layer3(y)
+            
+        return class_probs/(repeat+1)
 
 class SelfMadeNetwork(nn.Module):
     def __init__(self,
@@ -300,7 +321,7 @@ class SelfMadeNetwork(nn.Module):
         class_probs = self.layer3(x)
         return class_probs
 
-class DropoutTrainer(Framework):
+class DummyTrainer(Framework):
     def __init__(self, dataset_train,
                  *args, **kwargs):
         super().__init__(dataset_train, *args, **kwargs)
