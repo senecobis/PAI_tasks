@@ -5,6 +5,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "runna task 3",
+            "type": "python",
+            "request": "launch",
+            "program": "task3_handout/solution.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "run_solution",
             "type": "python",
             "request": "launch",

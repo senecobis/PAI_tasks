@@ -1,10 +1,12 @@
 import numpy as np
 from scipy.optimize import fmin_l_bfgs_b
-
+import math
+import matplotlib.pyplot as plt
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import Matern, ConstantKernel
+from sklearn.gaussian_process.kernels import Matern, ConstantKernel, WhiteKernel
 
 domain = np.array([[0, 5]])
+v_min = 1.2
 
 
 """ Solution """
@@ -15,8 +17,41 @@ class BO_algo():
         """Initializes the algorithm with a parameter configuration. """
 
         # TODO: enter your code here
-        pass
+        # Kernel f
+        self.var_f = 0.5
+        self.len_scale_f = 0.5
+        self.nu_f = 2.5
+        # Kernel v
+        self.mean_v = 1.5
+        self.var_v = math.sqrt(2)
+        self.len_scale_v = 0.5
+        self.nu_v = 2.5
 
+        self.alpha = 1e-6
+        self.restart = 30
+        # GP f
+        self.gp_f = GaussianProcessRegressor(
+            kernel=Matern(length_scale=self.len_scale_f, nu=self.nu_f), 
+            alpha=self.alpha,
+            normalize_y=True,
+            n_restarts_optimizer=self.restart,
+            #random_state=self._random_state,
+        )
+        # GP v
+        self.gp_v = GaussianProcessRegressor(
+            kernel=ConstantKernel(constant_value=self.mean_v)
+            + Matern(length_scale=self.len_scale_v, nu=self.nu_v), 
+            alpha=self.alpha,
+            normalize_y=True,
+            n_restarts_optimizer=self.restart,
+            #random_state=self._random_state,
+        )
+        
+        
+        self.beta = 2
+        self.X = np.empty((0,1))
+        self.Y = np.empty((0,1))
+        self.V = np.empty((0,1))
 
     def next_recommendation(self):
         """
@@ -27,10 +62,24 @@ class BO_algo():
         recommendation: np.ndarray
             1 x domain.shape[0] array containing the next point to evaluate
         """
-
-        # TODO: enter your code here
         # In implementing this function, you may use optimize_acquisition_function() defined below.
-        raise NotImplementedError
+        x0 = domain[:, 0] + (domain[:, 1] - domain[:, 0]) * np.random.rand(domain.shape[0])
+        if self.X.size == 0:
+            # if no point has been sampled yet, we can't optimize the acquisition function yet
+            # we instead sample a random starting point in the domain
+            #next_x = np.array([x0]).reshape(-1, domain.shape[0])
+            next_x[np.newaxis, :]
+        else:
+            if len(self.Y) == 12 and np.all(self.Y < 0.4):
+                # if after 10 iterations we have not found a point with a accuracy larger than 0.3
+                # we take a random point in the domain as next point
+                x0 = (self.X[0] + (domain[:, 1] - domain[:, 0])/2) % domain[:, 1]
+                next_x = np.array([x0]).reshape(-1, domain.shape[0])
+            else:
+                next_x = self.optimize_acquisition_function()
+
+        assert next_x.shape == (1, domain.shape[0])
+        return next_x
 
 
     def optimize_acquisition_function(self):
@@ -51,15 +100,14 @@ class BO_algo():
 
         # Restarts the optimization 20 times and pick best solution
         for _ in range(20):
-            x0 = domain[:, 0] + (domain[:, 1] - domain[:, 0]) * \
-                 np.random.rand(domain.shape[0])
-            result = fmin_l_bfgs_b(objective, x0=x0, bounds=domain,
-                                   approx_grad=True)
+            x0 = domain[:, 0] + (domain[:, 1] - domain[:, 0]) * np.random.rand(domain.shape[0])
+            result = fmin_l_bfgs_b(objective, x0=x0, bounds=domain, approx_grad=True)
             x_values.append(np.clip(result[0], *domain[0]))
             f_values.append(-result[1])
 
         ind = np.argmax(f_values)
         return np.atleast_2d(x_values[ind])
+
 
     def acquisition_function(self, x):
         """
@@ -75,10 +123,13 @@ class BO_algo():
         af_value: float
             Value of the acquisition function at x
         """
+        
+        # def update_acquisition_function(self):        
+        pred_mean_f, pred_stddev_f = self.gp_f.predict(x[np.newaxis,:], return_std=True)
+        ucb_f = pred_mean_f + self.beta * pred_stddev_f  # Calculate UCB.
 
-        # TODO: enter your code here
-        raise NotImplementedError
-
+        return ucb_f.squeeze()
+ 
 
     def add_data_point(self, x, f, v):
         """
@@ -93,9 +144,14 @@ class BO_algo():
         v: np.ndarray
             Model training speed
         """
+        self.X = np.vstack((self.X, x))
+        self.Y = np.vstack((self.Y, f))
+        self.V = np.vstack((self.V, v))
 
-        # TODO: enter your code here
-        raise NotImplementedError
+        self.gp_f.fit(self.X, self.Y)
+        self.gp_v.fit(self.X, self.V)
+
+
 
     def get_solution(self):
         """
@@ -106,9 +162,14 @@ class BO_algo():
         solution: np.ndarray
             1 x domain.shape[0] array containing the optimal solution of the problem
         """
+        #plt.plot(self.V)
 
-        # TODO: enter your code here
-        raise NotImplementedError
+        self.Y[self.V < v_min] = -1e-10 #shorthand for -np.inf
+        highest_y = np.argmax(self.Y)
+
+        return self.X[highest_y]
+        
+
 
 
 """ Toy problem to check code works as expected """
@@ -133,10 +194,9 @@ def v(x):
 def main():
     # Init problem
     agent = BO_algo()
-    
+    n_dim = domain.shape[0]
     # Add initial safe point
-    x_init = domain[:, 0] + (domain[:, 1] - domain[:, 0]) * np.random.rand(
-            1, n_dim)
+    x_init = domain[:, 0] + (domain[:, 1] - domain[:, 0]) * np.random.rand(1, n_dim)
     obj_val = f(x_init)
     cost_val = v(x_init)
     agent.add_data_point(x_init, obj_val, cost_val)
