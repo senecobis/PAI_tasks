@@ -26,7 +26,7 @@ class BO_algo():
         self.selected_x = []
         self.selected_y = []
         self.selected_v = []
-        self.index = 0
+        self.perc_of_unsafe_eval = 0
         
         # Kernel f
         self.var_f = 0.5
@@ -69,18 +69,28 @@ class BO_algo():
             1 x domain.shape[0] array containing the next point to evaluate
         """
         # In implementing this function, you may use optimize_acquisition_function() defined below.
-        #if self.X.size == 1:
-        #    return np.array([[np.random.uniform(0, 5)]])
-        #else:
+
+        # predict next point optimazing our a(x) function
+        # if the evaluation is unsafe then take a point at random
         next_x = self.optimize_acquisition_function()
         corresponding_v = self.gp_v.predict(next_x)
+
+        # add the possibility to do unsafe eval but less then 5 percent
         
         if corresponding_v < self.v_min:
-            print("unsafe next point")
+            print(f"unsafe next point {next_x}\n \
+                    with velocity {corresponding_v}\n\
+                    falling back to random point ")
             next_x = np.array([[np.random.uniform(0, 5)]])
+            ind=0
             while self.gp_v.predict(next_x) < self.v_min:
                 next_x = np.array([[np.random.uniform(0, 5)]])
+                ind+=1
 
+            print(f"reinitialized {ind} times \n \
+                    with a final vel of {self.gp_v.predict(next_x)}")
+
+        #next_x = 5
         return next_x
 
 
@@ -172,9 +182,9 @@ class BO_algo():
         v: np.ndarray
             Model training speed
         """
-        self.selected_x.append(float(x.squeeze()))
-        self.selected_y.append(float(f.squeeze()))
-        self.selected_v.append(float(v.squeeze()))
+        self.selected_x.append(int(x.squeeze()))
+        self.selected_y.append(int(f.squeeze()))
+        self.selected_v.append(int(v.squeeze()))
 
         self.X = np.vstack((self.X, x))
         self.f = np.vstack((self.f, f))
