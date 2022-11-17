@@ -32,21 +32,14 @@ class BO_algo():
         self.var_f = 0.5
         self.len_scale_f = 0.5
         self.nu_f = 2.5
-        self.ker_f = Matern(length_scale=self.len_scale_f, nu=self.nu_f)
+        self.ker_f = self.var_f*Matern(length_scale=self.len_scale_f, nu=self.nu_f)
 
         # Kernel v
         self.mean_v = 1.5
-        self.var_v = 2**0.5
+        self.var_v = np.sqrt(2)
         self.len_scale_v = 0.5
         self.nu_v = 2.5
-        self.ker_v = Matern(length_scale=self.len_scale_v, nu=self.nu_v)+ConstantKernel(constant_value=self.mean_v)
-
-        # GP parameters
-        #self.gen_rand = False
-        #self.sigma_f = 0.15
-        #self.sigma_v = 0.0001
-        #self.restart = 0
-        #length_scale_bounds=(1e-10, 100000.0)
+        self.ker_v = self.var_v*Matern(length_scale=self.len_scale_v, nu=self.nu_v)+ConstantKernel(constant_value=self.mean_v)
 
         # General initializations
         self.v_min = 1.2
@@ -55,8 +48,30 @@ class BO_algo():
         self.f = np.empty((0,1))
         self.V = np.empty((0,1))
 
-        self.gp_f = GaussianProcessRegressor(kernel=self.ker_f,alpha=self.var_f)
-        self.gp_v = GaussianProcessRegressor(kernel=self.ker_v,alpha=self.var_v)
+        self.gp_f = GaussianProcessRegressor(kernel=self.ker_f,alpha=0.001)
+        self.gp_v = GaussianProcessRegressor(kernel=self.ker_v,alpha=0.001)
+
+    def next_safe_random_point(self):
+
+        # TODO: add the possibility to do unsafe eval but less then 5 percent
+        bounds = np.squeeze(domain)
+        ind=0
+        # take a point at random that is greater than the one evaluated
+        for _ in range(1000):
+            next_x = np.array([[np.random.uniform(bounds[0], bounds[-1])]])
+            if self.gp_v.predict(np.vstack(self.X, next_x)) < self.v_min:
+                print(f"random round, predicted x {next_x} \
+                    and vel {self.gp_v.predict(next_x)}")
+                ind+=1
+            else:
+                print(f"\n --- save x {next_x}\
+                        found with vel {self.gp_v.predict(next_x)}")
+
+        print(f"\n --- reinitialized {ind}\
+                times with a final vel of {self.gp_v.predict(next_x)}")
+
+        return next_x
+
         
 
     def next_recommendation(self):
@@ -68,31 +83,18 @@ class BO_algo():
         recommendation: np.ndarray
             1 x domain.shape[0] array containing the next point to evaluate
         """
-        # In implementing this function, you may use optimize_acquisition_function() defined below.
 
-        # predict next point optimazing our a(x) function
+        # - In implementing this function, you may use optimize_acquisition_function() defined below.
+        # - Predict next point optimazing our a(x) function
         # if the evaluation is unsafe then take a point at random
+
         next_x = self.optimize_acquisition_function()
         corresponding_v = self.gp_v.predict(next_x)
-
-        # add the possibility to do unsafe eval but less then 5 percent
         
         if corresponding_v < self.v_min:
-            print(f"unsafe next point {next_x} with velocity {corresponding_v}\n\
-                    falling back to random point ")
-            next_x = np.array([[np.random.uniform(0, 5)]])
-            ind=0
-            # take a point at random that is greater than the one evaluated
-            while self.gp_v.predict(next_x) < self.v_min:
-                next_x = np.array([[np.random.uniform(next_x, 5)]])
-                ind+=1
-
-            print(f"reinitialized {ind} times \n \
-                    with a final vel of {self.gp_v.predict(next_x)}")
-
-        #next_x = 5
+            print(f"\n unsafe next point {next_x} with velocity {corresponding_v}")
+            #next_x = self.next_safe_random_point()
         return next_x
-
 
 
     def optimize_acquisition_function(self):
@@ -105,19 +107,10 @@ class BO_algo():
             1 x domain.shape[0] array containing the point that maximize the acquisition function.
         """
 
-        def objective(x):
-            return -self.acquisition_function(x)
-
-        f_values = []
-        x_values = []
-
-        # Restarts the optimization 20 times and pick best solution
-        for _ in range(20):
-            x0 = domain[:, 0] + (domain[:, 1] - domain[:, 0]) * np.random.rand(domain.shape[0])
-            result = fmin_l_bfgs_b(objective, x0=x0, bounds=domain, approx_grad=True)
-            x_values.append(np.clip(result[0], *domain[0]))
-            f_values.append(-result[1])
-
+        x_values = np.linspace(domain[:, 0], domain[:, 1], num=1000)
+        f_values = np.zeros(x_values.shape)
+        for i, x in enumerate(x_values):
+            f_values[i] = self.acquisition_function(x)
         ind = np.argmax(f_values)
         return np.atleast_2d(x_values[ind])
 
@@ -137,7 +130,6 @@ class BO_algo():
             Value of the acquisition function at x
         """
         if method == "UCB":
-
             self.gp_f.fit(self.X, self.f)
             self.gp_v.fit(self.X, self.V)
             pred_mean_f, pred_stddev_f = self.gp_f.predict(x[np.newaxis,:], return_std=True)
@@ -184,7 +176,7 @@ class BO_algo():
         """
         self.selected_x.append(int(x.squeeze()))
         self.selected_y.append(int(f.squeeze()))
-        self.selected_v.append(int(v.squeeze()))
+       #self.selected_v.append(int(v.squeeze()))
 
         self.X = np.vstack((self.X, x))
         self.f = np.vstack((self.f, f))
@@ -206,7 +198,7 @@ class BO_algo():
 
         print(f"Selected {len(self.selected_x)} points: {self.selected_x} \n \
                 and corresponding accuracies: {self.selected_y} \n \
-                and velocity {self.selected_v}")
+                and velocity {self.V}")
         
         #plt.plot(self.X, color='black')
         #plt.plot(self.f, color='red')

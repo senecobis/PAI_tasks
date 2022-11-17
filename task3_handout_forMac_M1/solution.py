@@ -1,8 +1,14 @@
 import numpy as np
+import os
 from scipy.optimize import fmin_l_bfgs_b
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import Matern, ConstantKernel, WhiteKernel
 
+EXTENDED_EVALUATION = False
 domain = np.array([[0, 5]])
-
+np.random.seed(0)
 
 """ Solution """
 
@@ -11,9 +17,40 @@ class BO_algo():
     def __init__(self):
         """Initializes the algorithm with a parameter configuration. """
 
-        # TODO: enter your code here
-        pass
+        def warn(*args, **kwargs):
+            pass
+        import warnings
+        warnings.warn = warn
 
+        # plottings variables
+        self.selected_x = []
+        self.selected_y = []
+        self.selected_v = []
+        self.perc_of_unsafe_eval = 0
+        
+        # Kernel f
+        self.var_f = 0.5
+        self.len_scale_f = 0.5
+        self.nu_f = 2.5
+        self.ker_f = self.var_f*Matern(length_scale=self.len_scale_f, nu=self.nu_f)
+
+        # Kernel v
+        self.mean_v = 1.5
+        self.var_v = np.sqrt(2)
+        self.len_scale_v = 0.5
+        self.nu_v = 2.5
+        self.ker_v = self.var_v*Matern(length_scale=self.len_scale_v, nu=self.nu_v)+ConstantKernel(constant_value=self.mean_v)
+
+        # General initializations
+        self.v_min = 1.2
+        self.beta = 5
+        self.X = np.empty((0,1))
+        self.f = np.empty((0,1))
+        self.V = np.empty((0,1))
+
+        self.gp_f = GaussianProcessRegressor(kernel=self.ker_f,alpha=0.001)
+        self.gp_v = GaussianProcessRegressor(kernel=self.ker_v,alpha=0.001)
+        
 
     def next_recommendation(self):
         """
@@ -24,10 +61,44 @@ class BO_algo():
         recommendation: np.ndarray
             1 x domain.shape[0] array containing the next point to evaluate
         """
-
-        # TODO: enter your code here
         # In implementing this function, you may use optimize_acquisition_function() defined below.
-        raise NotImplementedError
+
+        # predict next point optimazing our a(x) function
+        # if the evaluation is unsafe then take a point at random
+        bounds = np.squeeze(domain)
+        next_x = self.optimize_acquisition_function()
+        corresponding_v = self.gp_v.predict(next_x)
+
+        # TODO: add the possibility to do unsafe eval but less then 5 percent
+
+        # if self.X.shape == 1:
+        #     for _ in range(100):
+        #         next_x = np.array([[np.random.uniform(next_x, bounds[-1])]])
+        #         print(f"random roun   d, predicted x {next_x} and vel {self.gp_v.predict(np.vstack((self.X, next_x)))}")
+
+
+        if corresponding_v < self.v_min:
+            print(f"\n --- unsafe next point {next_x}\
+                 with velocity {corresponding_v} falling back to random point ")
+            ind=0
+            # take a point at random that is greater than the one evaluated
+            for _ in range(1000):
+                next_x = np.array([[np.random.uniform(bounds[0], bounds[-1])]])
+
+                if self.gp_v.predict(np.vstack(self.X, next_x)) < self.v_min:
+                    print(f"random round, predicted x {next_x} \
+                        and vel {self.gp_v.predict(next_x)}")
+                    ind+=1
+                else:
+                    print(f"\n --- save x {next_x}\
+                         found with vel {self.gp_v.predict(next_x)}")
+
+            print(f"\n --- reinitialized {ind}\
+                    times with a final vel of {self.gp_v.predict(next_x)}")
+
+        #next_x = 5
+        return next_x
+
 
 
     def optimize_acquisition_function(self):
@@ -39,26 +110,30 @@ class BO_algo():
         x_opt: np.ndarray
             1 x domain.shape[0] array containing the point that maximize the acquisition function.
         """
+        old_optimization = False
+        if old_optimization:
+            def objective(x):
+                return -self.acquisition_function(x)
+            f_values = []
+            x_values = []
+            # Restarts the optimization 20 times and pick best solution
+            for _ in range(20):
+                x0 = domain[:, 0] + (domain[:, 1] - domain[:, 0]) * np.random.rand(domain.shape[0])
+                result = fmin_l_bfgs_b(objective, x0=x0, bounds=domain, approx_grad=True)
+                x_values.append(np.clip(result[0], *domain[0]))
+                f_values.append(-result[1])
+            ind = np.argmax(f_values)
+            return np.atleast_2d(x_values[ind])
+        else:
+            x_values = np.linspace(domain[:, 0], domain[:, 1], num=1000)
+            f_values = np.zeros(x_values.shape)
+            for i, x in enumerate(x_values):
+                f_values[i] = self.acquisition_function(x)
+            ind = np.argmax(f_values)
+            return np.atleast_2d(x_values[ind])
 
-        def objective(x):
-            return -self.acquisition_function(x)
 
-        f_values = []
-        x_values = []
-
-        # Restarts the optimization 20 times and pick best solution
-        for _ in range(20):
-            x0 = domain[:, 0] + (domain[:, 1] - domain[:, 0]) * \
-                 np.random.rand(domain.shape[0])
-            result = fmin_l_bfgs_b(objective, x0=x0, bounds=domain,
-                                   approx_grad=True)
-            x_values.append(np.clip(result[0], *domain[0]))
-            f_values.append(-result[1])
-
-        ind = np.argmax(f_values)
-        return np.atleast_2d(x_values[ind])
-
-    def acquisition_function(self, x):
+    def acquisition_function(self, x, method="UCB"):
         """
         Compute the acquisition function.
 
@@ -72,10 +147,37 @@ class BO_algo():
         af_value: float
             Value of the acquisition function at x
         """
+        if method == "UCB":
+            self.gp_f.fit(self.X, self.f)
+            self.gp_v.fit(self.X, self.V)
+            pred_mean_f, pred_stddev_f = self.gp_f.predict(x[np.newaxis,:], return_std=True)
+            return (pred_mean_f + self.beta * pred_stddev_f).squeeze() 
 
-        # TODO: enter your code here
-        raise NotImplementedError
+        elif method == "EI":
+            # de-mean data?
+            
+            #two strategies for picking t possible
+            # a) t is minimum over previous observations
+            # b) t is minimum of expected value of the objective
+            if self.t_choice == 'observations':
+                t = np.array(self.previous_points)[:,2].min()
+            elif self.t_choice == 'expectation':
+                t = self.objective_model.predict(self.theta_sample).min()
+            
+            # constraint
+            c_mean, c_std = self.constraint_model.predict(np.atleast_2d(x), return_std=True)
+            prob_constraint = norm.cdf(0, loc=c_mean, scale=c_std)
+            
+            # objective
+            y_mean, y_std = self.objective_model.predict(np.atleast_2d(x), return_std=True)
+            z_x = (t - y_mean - self.xi)/y_std
 
+            ei_x =  y_std *(z_x * norm.cdf(z_x) + norm.pdf(z_x))
+            
+            return prob_constraint * ei_x
+
+        #return ucb_f.squeeze()
+ 
 
     def add_data_point(self, x, f, v):
         """
@@ -90,9 +192,14 @@ class BO_algo():
         v: np.ndarray
             Model training speed
         """
+        self.selected_x.append(int(x.squeeze()))
+        self.selected_y.append(int(f.squeeze()))
+       #self.selected_v.append(int(v.squeeze()))
 
-        # TODO: enter your code here
-        raise NotImplementedError
+        self.X = np.vstack((self.X, x))
+        self.f = np.vstack((self.f, f))
+        self.V = np.vstack((self.V, v))
+
 
     def get_solution(self):
         """
@@ -103,10 +210,26 @@ class BO_algo():
         solution: np.ndarray
             1 x domain.shape[0] array containing the optimal solution of the problem
         """
+        valid_f = self.f
+        #valid_f[self.V < self.v_min] = -1e6 #shorthand for -np.inf
+        optmal_x = self.X[np.argmax(valid_f)]
 
-        # TODO: enter your code here
-        raise NotImplementedError
+        print(f"Selected {len(self.selected_x)} points: {self.selected_x} \n \
+                and corresponding accuracies: {self.selected_y} \n \
+                and velocity {self.V}")
+        
+        #plt.plot(self.X, color='black')
+        #plt.plot(self.f, color='red')
+        #plt.plot(self.V, color='blue')
+        #plt.show()
+        #plt.savefig(f'{os.getcwd()}/images/x_points_{self.index}.png')
+        #plt.savefig(f'x_points_{self.index}.png')
 
+
+        self.index += 1
+
+        return optmal_x
+        
 
 """ Toy problem to check code works as expected """
 
@@ -130,8 +253,16 @@ def v(x):
 def main():
     # Init problem
     agent = BO_algo()
-
+    n_dim = domain.shape[0]
+    # Add initial safe point
+    x_init = domain[:, 0] + (domain[:, 1] - domain[:, 0]) * np.random.rand(1, n_dim)
+    obj_val = f(x_init)
+    cost_val = v(x_init)
+    agent.add_data_point(x_init, obj_val, cost_val)
+    
     # Loop until budget is exhausted
+    data = []
+    label = []
     for j in range(20):
         # Get next recommendation
         x = agent.next_recommendation()
@@ -145,6 +276,11 @@ def main():
         obj_val = f(x)
         cost_val = v(x)
         agent.add_data_point(x, obj_val, cost_val)
+        data.append(x.squeeze())
+        label.append(obj_val)
+
+    plt.plot(data, label, 'o', color='black')
+    plt.show()
 
     # Validate solution
     solution = np.atleast_2d(agent.get_solution())
