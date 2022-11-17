@@ -1,5 +1,5 @@
 import numpy as np
-import os
+import time
 from scipy.optimize import fmin_l_bfgs_b
 import matplotlib.pyplot as plt
 from scipy.stats import norm
@@ -8,7 +8,7 @@ from sklearn.gaussian_process.kernels import Matern, ConstantKernel, WhiteKernel
 
 EXTENDED_EVALUATION = False
 domain = np.array([[0, 5]])
-np.random.seed(0)
+np.random.seed(1)
 
 """ Solution """
 
@@ -21,12 +21,6 @@ class BO_algo():
             pass
         import warnings
         warnings.warn = warn
-
-        # plottings variables
-        self.selected_x = []
-        self.selected_y = []
-        self.selected_v = []
-        self.index = 0
         
         # Kernel f
         self.var_f = 0.5
@@ -50,12 +44,12 @@ class BO_algo():
 
         # General initializations
         self.v_min = 1.2
-        self.beta = 5
+        self.beta = 2
         self.X = np.empty((0,1))
         self.f = np.empty((0,1))
         self.V = np.empty((0,1))
 
-        self.gp_f = GaussianProcessRegressor(kernel=self.ker_f,alpha=self.var_f)
+        self.gp_f = GaussianProcessRegressor(kernel=self.ker_f,alpha=self.var_f, normalize_y=True)
         self.gp_v = GaussianProcessRegressor(kernel=self.ker_v,alpha=self.var_v)
         
 
@@ -68,51 +62,30 @@ class BO_algo():
         recommendation: np.ndarray
             1 x domain.shape[0] array containing the next point to evaluate
         """
-        # In implementing this function, you may use optimize_acquisition_function() defined below.
-        #if self.X.size == 1:
-        #    return np.array([[np.random.uniform(0, 5)]])
-        #else:
+
+        self.gp_f.fit(X=self.X.reshape(-1,1), y=self.f)
+        self.gp_v.fit(X=self.X.reshape(-1,1), y=self.V)
+
         next_x = self.optimize_acquisition_function()
-        corresponding_v = self.gp_v.predict(next_x)
-        
-        if corresponding_v < self.v_min:
-            print("unsafe next point")
-            next_x = np.array([[np.random.uniform(0, 5)]])
-            while self.gp_v.predict(next_x) < self.v_min:
-                next_x = np.array([[np.random.uniform(0, 5)]])
 
-        return next_x
+        return np.array(next_x).reshape(1,1)
 
+    def optimize_acquisition_function(self, num_points = 100):
 
+        test_x = np.linspace(start=0, stop=5, num=num_points)
+        test_x = np.array([x for x in test_x if x not in self.X])
+        # test_x = 5 * np.random.rand(num_points)
+        val_x = self.acquisition_function(test_x)
+        # print()
+        # print("test", np.around(test_x, decimals=2))
+        # print("val ", np.around(val_x, decimals=2).reshape(-1))
+        # print()
+        best_x_idx = np.argmax(val_x)
 
-    def optimize_acquisition_function(self):
-        """
-        Optimizes the acquisition function.
-
-        Returns
-        -------
-        x_opt: np.ndarray
-            1 x domain.shape[0] array containing the point that maximize the acquisition function.
-        """
-
-        def objective(x):
-            return -self.acquisition_function(x)
-
-        f_values = []
-        x_values = []
-
-        # Restarts the optimization 20 times and pick best solution
-        for _ in range(20):
-            x0 = domain[:, 0] + (domain[:, 1] - domain[:, 0]) * np.random.rand(domain.shape[0])
-            result = fmin_l_bfgs_b(objective, x0=x0, bounds=domain, approx_grad=True)
-            x_values.append(np.clip(result[0], *domain[0]))
-            f_values.append(-result[1])
-
-        ind = np.argmax(f_values)
-        return np.atleast_2d(x_values[ind])
+        return test_x[best_x_idx]
 
 
-    def acquisition_function(self, x, method="UCB"):
+    def acquisition_function(self, x):
         """
         Compute the acquisition function.
 
@@ -126,37 +99,18 @@ class BO_algo():
         af_value: float
             Value of the acquisition function at x
         """
-        if method == "UCB":
 
-            self.gp_f.fit(self.X, self.f)
-            self.gp_v.fit(self.X, self.V)
-            pred_mean_f, pred_stddev_f = self.gp_f.predict(x[np.newaxis,:], return_std=True)
-            return (pred_mean_f + self.beta * pred_stddev_f).squeeze() 
+        def objective(f_mean, f_std, v_mean, v_std, v_penalty = True):
+            ucb_f = f_mean + self.beta*f_std
+            v_penalty = 1e5 if (v_mean-v_std) < self.v_min and v_penalty else 0.0
+            return ucb_f - v_penalty
 
-        elif method == "EI":
-            # de-mean data?
-            
-            #two strategies for picking t possible
-            # a) t is minimum over previous observations
-            # b) t is minimum of expected value of the objective
-            if self.t_choice == 'observations':
-                t = np.array(self.previous_points)[:,2].min()
-            elif self.t_choice == 'expectation':
-                t = self.objective_model.predict(self.theta_sample).min()
-            
-            # constraint
-            c_mean, c_std = self.constraint_model.predict(np.atleast_2d(x), return_std=True)
-            prob_constraint = norm.cdf(0, loc=c_mean, scale=c_std)
-            
-            # objective
-            y_mean, y_std = self.objective_model.predict(np.atleast_2d(x), return_std=True)
-            z_x = (t - y_mean - self.xi)/y_std
+        pred_mean_f, pred_stddev_f = self.gp_f.predict(x.reshape(-1, 1), return_std=True)
+        pred_mean_v, pred_stddev_v = self.gp_v.predict(x.reshape(-1, 1), return_std=True)
 
-            ei_x =  y_std *(z_x * norm.cdf(z_x) + norm.pdf(z_x))
-            
-            return prob_constraint * ei_x
+        acquisition_val = [objective(pred_mean_f[i], pred_stddev_f[i], pred_mean_v[i], pred_stddev_v[i]) for i in range(len(pred_mean_f))]
 
-        #return ucb_f.squeeze()
+        return acquisition_val
  
 
     def add_data_point(self, x, f, v):
@@ -172,10 +126,7 @@ class BO_algo():
         v: np.ndarray
             Model training speed
         """
-        self.selected_x.append(float(x.squeeze()))
-        self.selected_y.append(float(f.squeeze()))
-        self.selected_v.append(float(v.squeeze()))
-
+        # print(np.around(self.X.reshape((-1)), decimals=2))
         self.X = np.vstack((self.X, x))
         self.f = np.vstack((self.f, f))
         self.V = np.vstack((self.V, v))
@@ -191,24 +142,10 @@ class BO_algo():
             1 x domain.shape[0] array containing the optimal solution of the problem
         """
         valid_f = self.f
-        #valid_f[self.V < self.v_min] = -1e6 #shorthand for -np.inf
-        optmal_x = self.X[np.argmax(valid_f)]
+        valid_f[self.V < self.v_min] = -np.inf
+        optimal_x = self.X[np.argmax(valid_f)]
 
-        print(f"Selected {len(self.selected_x)} points: {self.selected_x} \n \
-                and corresponding accuracies: {self.selected_y} \n \
-                and velocity {self.selected_v}")
-        
-        #plt.plot(self.X, color='black')
-        #plt.plot(self.f, color='red')
-        #plt.plot(self.V, color='blue')
-        #plt.show()
-        #plt.savefig(f'{os.getcwd()}/images/x_points_{self.index}.png')
-        #plt.savefig(f'x_points_{self.index}.png')
-
-
-        self.index += 1
-
-        return optmal_x
+        return optimal_x
         
 
 """ Toy problem to check code works as expected """
