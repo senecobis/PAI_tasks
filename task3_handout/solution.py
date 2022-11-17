@@ -78,13 +78,13 @@ class BO_algo():
         # add the possibility to do unsafe eval but less then 5 percent
         
         if corresponding_v < self.v_min:
-            print(f"unsafe next point {next_x}\n \
-                    with velocity {corresponding_v}\n\
+            print(f"unsafe next point {next_x} with velocity {corresponding_v}\n\
                     falling back to random point ")
             next_x = np.array([[np.random.uniform(0, 5)]])
             ind=0
+            # take a point at random that is greater than the one evaluated
             while self.gp_v.predict(next_x) < self.v_min:
-                next_x = np.array([[np.random.uniform(0, 5)]])
+                next_x = np.array([[np.random.uniform(next_x, 5)]])
                 ind+=1
 
             print(f"reinitialized {ind} times \n \
