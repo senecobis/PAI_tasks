@@ -17,55 +17,46 @@ class BO_algo():
     def __init__(self):
         """Initializes the algorithm with a parameter configuration. """
 
+        def warn(*args, **kwargs):
+            pass
+        import warnings
+        warnings.warn = warn
+
         # plottings variables
         self.selected_x = []
+        self.selected_y = []
+        self.selected_v = []
         self.index = 0
         
         # Kernel f
         self.var_f = 0.5
         self.len_scale_f = 0.5
         self.nu_f = 2.5
+        self.ker_f = Matern(length_scale=self.len_scale_f, nu=self.nu_f)
 
         # Kernel v
         self.mean_v = 1.5
         self.var_v = 2**0.5
         self.len_scale_v = 0.5
         self.nu_v = 2.5
+        self.ker_v = Matern(length_scale=self.len_scale_v, nu=self.nu_v)+ConstantKernel(constant_value=self.mean_v)
 
         # GP parameters
-        self.gen_rand = False
-        self.sigma_f = 0.15
-        self.sigma_v = 0.0001
-        self.randomstate = 0 if not self.gen_rand else np.random.randint(100)
-        self.restart = 0
-        length_scale_bounds=(1e-10, 100000.0)
+        #self.gen_rand = False
+        #self.sigma_f = 0.15
+        #self.sigma_v = 0.0001
+        #self.restart = 0
+        #length_scale_bounds=(1e-10, 100000.0)
 
         # General initializations
         self.v_min = 1.2
-        self.beta = 2
+        self.beta = 5
         self.X = np.empty((0,1))
-        self.output_accuracy = np.empty((0,1))
+        self.f = np.empty((0,1))
         self.V = np.empty((0,1))
 
-        # GP f
-        self.gp_f = GaussianProcessRegressor(
-            kernel=
-                Matern(length_scale=self.len_scale_f, nu=self.nu_f, length_scale_bounds=length_scale_bounds)+
-                    WhiteKernel(noise_level=self.var_f), 
-            alpha=self.sigma_f**2,
-            normalize_y=True,
-            n_restarts_optimizer=self.restart,
-        )
-        # GP v
-        self.gp_v = GaussianProcessRegressor(
-            kernel=
-                Matern(length_scale=self.len_scale_v, nu=self.nu_v,length_scale_bounds=length_scale_bounds)+
-                    ConstantKernel(constant_value=self.mean_v)+
-                        WhiteKernel(noise_level=self.var_v), 
-            alpha=self.sigma_v**2,
-            normalize_y=True,
-            n_restarts_optimizer=self.restart,
-        )
+        self.gp_f = GaussianProcessRegressor(kernel=self.ker_f,alpha=self.var_f)
+        self.gp_v = GaussianProcessRegressor(kernel=self.ker_v,alpha=self.var_v)
         
 
     def next_recommendation(self):
@@ -78,16 +69,20 @@ class BO_algo():
             1 x domain.shape[0] array containing the next point to evaluate
         """
         # In implementing this function, you may use optimize_acquisition_function() defined below.
-        if self.X.size == 0:
-            # if no point has been sampled yet, we can't optimize the acquisition function yet
-            # we instead sample a random starting point in the domain
-            x0 = np.random.random()*domain.squeeze()[-1]
-            next_x = x0[np.newaxis, :]
-        else:
-            next_x = self.optimize_acquisition_function()
+        #if self.X.size == 1:
+        #    return np.array([[np.random.uniform(0, 5)]])
+        #else:
+        next_x = self.optimize_acquisition_function()
+        corresponding_v = self.gp_v.predict(next_x)
+        
+        if corresponding_v < self.v_min:
+            print("unsafe next point")
+            next_x = np.array([[np.random.uniform(0, 5)]])
+            while self.gp_v.predict(next_x) < self.v_min:
+                next_x = np.array([[np.random.uniform(0, 5)]])
 
-        assert next_x.shape == (1, domain.shape[0])
         return next_x
+
 
 
     def optimize_acquisition_function(self):
@@ -132,8 +127,12 @@ class BO_algo():
             Value of the acquisition function at x
         """
         if method == "UCB":
+
+            self.gp_f.fit(self.X, self.f)
+            self.gp_v.fit(self.X, self.V)
             pred_mean_f, pred_stddev_f = self.gp_f.predict(x[np.newaxis,:], return_std=True)
-            ucb_f = pred_mean_f + self.beta * pred_stddev_f  # Calculate UCB.
+            return (pred_mean_f + self.beta * pred_stddev_f).squeeze() 
+
         elif method == "EI":
             # de-mean data?
             
@@ -157,7 +156,7 @@ class BO_algo():
             
             return prob_constraint * ei_x
 
-        return ucb_f.squeeze()
+        #return ucb_f.squeeze()
  
 
     def add_data_point(self, x, f, v):
@@ -173,13 +172,13 @@ class BO_algo():
         v: np.ndarray
             Model training speed
         """
+        self.selected_x.append(float(x.squeeze()))
+        self.selected_y.append(float(f.squeeze()))
+        self.selected_v.append(float(v.squeeze()))
+
         self.X = np.vstack((self.X, x))
-        self.output_accuracy = np.vstack((self.output_accuracy, f))
+        self.f = np.vstack((self.f, f))
         self.V = np.vstack((self.V, v))
-
-        self.gp_f.fit(self.X, self.output_accuracy)
-        self.gp_v.fit(self.X, self.V)
-
 
 
     def get_solution(self):
@@ -191,18 +190,18 @@ class BO_algo():
         solution: np.ndarray
             1 x domain.shape[0] array containing the optimal solution of the problem
         """
-        valid_f = self.output_accuracy
-        valid_f[self.V < self.v_min] = -1e6 #shorthand for -np.inf
+        valid_f = self.f
+        #valid_f[self.V < self.v_min] = -1e6 #shorthand for -np.inf
         optmal_x = self.X[np.argmax(valid_f)]
-        print(f"valid_f: {valid_f[self.V > self.v_min]} \n \
-            with the highest accuracy: {np.max(valid_f)} \n \
-                and corresponding x: {optmal_x} \n \
-                    and velocity {self.V[self.V > self.v_min]}")
+
+        print(f"Selected {len(self.selected_x)} points: {self.selected_x} \n \
+                and corresponding accuracies: {self.selected_y} \n \
+                and velocity {self.selected_v}")
         
-        plt.plot(self.X, color='black')
-        plt.plot(self.output_accuracy, color='red')
-        plt.plot(self.V, color='blue')
-        plt.show()
+        #plt.plot(self.X, color='black')
+        #plt.plot(self.f, color='red')
+        #plt.plot(self.V, color='blue')
+        #plt.show()
         #plt.savefig(f'{os.getcwd()}/images/x_points_{self.index}.png')
         #plt.savefig(f'x_points_{self.index}.png')
 
@@ -242,6 +241,8 @@ def main():
     agent.add_data_point(x_init, obj_val, cost_val)
     
     # Loop until budget is exhausted
+    data = []
+    label = []
     for j in range(20):
         # Get next recommendation
         x = agent.next_recommendation()
@@ -255,6 +256,11 @@ def main():
         obj_val = f(x)
         cost_val = v(x)
         agent.add_data_point(x, obj_val, cost_val)
+        data.append(x.squeeze())
+        label.append(obj_val)
+
+    plt.plot(data, label, 'o', color='black')
+    plt.show()
 
     # Validate solution
     solution = np.atleast_2d(agent.get_solution())
