@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, ConstantKernel
+from scipy.stats import norm
 
 EXTENDED_EVALUATION = False
 domain = np.array([[0, 5]])
@@ -39,7 +40,7 @@ class BO_algo:
 
         # Kernel v
         noise_v = 1e-4
-        self.ker_v = np.sqrt(2) * Matern(length_scale=0.5, nu=2.5) + 1.5
+        self.ker_v = np.sqrt(2) * Matern(length_scale=0.5, nu=2.5) + ConstantKernel(1.5)
 
         self.gp_f = GaussianProcessRegressor(kernel=self.ker_f, alpha=noise_f**2)
         self.gp_v = GaussianProcessRegressor(kernel=self.ker_v, alpha=noise_v**2)
@@ -53,17 +54,30 @@ class BO_algo:
         recommendation: np.ndarray
             1 x domain.shape[0] array containing the next point to evaluate
         """
-        if self.unsafe_counter > 1:
-            return 0
-        
-        self.gp_f.fit(X=self.X.reshape(-1, 1), y=self.F)
-        self.gp_v.fit(X=self.X.reshape(-1, 1), y=self.V)
+        """if self.unsafe_counter > 1:
+            return 0"""
+        if self.X.size == 0:
+            x0 = domain[:, 0] + (domain[:, 1] - domain[:, 0]) * np.random.rand(
+                domain.shape[0]
+            )
+            next_x = np.array([x0]).reshape(-1, domain.shape[0])
+        else:
+            if (
+                len(self.F) == 12
+                and np.all(self.V < 1.2 + 0.2)
+                and np.all(self.F < 0.5)
+            ):
+                x0 = domain[:, 0] + (domain[:, 1] - domain[:, 0]) * np.random.rand(
+                    domain.shape[0]
+                )
+                next_x = np.array([x0]).reshape(-1, domain.shape[0])
+            else:
+                next_x = self.optimize_acquisition_function()
 
-        next_x = self.optimize_acquisition_function()
 
         return np.atleast_2d(next_x)
 
-    def optimize_acquisition_function(self, num_points=200):
+    def optimize_acquisition_function(self, num_points=300):
 
         test_x = np.random.uniform(low=0, high=5, size=num_points)
         val_x = [
@@ -75,7 +89,7 @@ class BO_algo:
 
         return test_x[best_x_idx]
 
-    def acquisition_function(self, x, v_penalty=False):
+    def acquisition_function(self, x, UCB=False, v_penalty=False):
         """
         Compute the acquisition function.
 
@@ -89,12 +103,61 @@ class BO_algo:
         af_value: float
             Value of the acquisition function at x
         """
+        if UCB is True:
+            mean_f, stddev_f = self.gp_f.predict(x.reshape(-1, 1), return_std=True)
+            mean_v, stddev_v = self.gp_v.predict(x.reshape(-1, 1), return_std=True)
+            ucb_f = mean_f + self.beta * stddev_f
+            min_possible_v = mean_v - (2 + self.unsafe_counter) * stddev_v
+            ucb_mod = (0.9 * ucb_f) if (min_possible_v > self.v_min) else 0.1 * ucb_f
+            af_value = ucb_mod if (v_penalty) else ucb_f
+        else:
+            ei = self.expected_improvement(x, eps=0.015)
+            constraint_weight = self.constraint_function(x)
+            af_value = float(ei * constraint_weight)
+
+        return af_value
+
+    def expected_improvement(self, x, eps=0.01):
+        """
+        Compute expected improvement at points x based on samples x_samples
+        and y_samples using Gaussian process surrogate
+        Args:
+            x: Points at which EI should be computed
+            eps: Exploitation-exploration trade-off parameter
+        """
+
         mean_f, stddev_f = self.gp_f.predict(x.reshape(-1, 1), return_std=True)
+        mean_F = self.gp_f.predict(self.X)
+
+        stddev_f = stddev_f.reshape(-1, 1)
+        mean_sample_opt = np.max(mean_F)
+        with np.errstate(divide="warn"):
+            imp = mean_f - mean_sample_opt - eps
+            Z = imp / stddev_f
+            ei = imp * norm.cdf(Z) + stddev_f * norm.pdf(Z)
+            ei[stddev_f == 0.0] = 0.0
+
+        return ei
+
+    def constraint_function(self, x):
+        """
+        https://arxiv.org/abs/1403.5607
+        """
+
+        # predict distribution of speed v
         mean_v, stddev_v = self.gp_v.predict(x.reshape(-1, 1), return_std=True)
-        ucb_f = mean_f + self.beta * stddev_f
-        min_possible_v = mean_v - (2+self.unsafe_counter) * stddev_v
-        ucb_mod = (0.9 * ucb_f) if (min_possible_v > self.v_min) else 0.1 * ucb_f
-        return ucb_mod if (v_penalty) else ucb_f
+
+        # Gaussian CDF with params from GPR prediction
+        if stddev_v != 0:
+            pr = 1 - norm.cdf(self.v_min, loc=mean_v, scale=stddev_v)
+        else:
+            pr = (
+                0.98 * (mean_v - self.v_min)
+                if mean_v >= self.v_min
+                else 0.02 * (self.v_min - mean_v)
+            )
+
+        return pr
 
     def add_data_point(self, x, f, v):
         """
@@ -115,6 +178,9 @@ class BO_algo:
         self.X = np.vstack((self.X, x))
         self.F = np.vstack((self.F, f))
         self.V = np.vstack((self.V, v))
+
+        self.gp_f.fit(X=self.X.reshape(-1, 1), y=self.F)
+        self.gp_v.fit(X=self.X.reshape(-1, 1), y=self.V)
 
     def get_solution(self):
         """

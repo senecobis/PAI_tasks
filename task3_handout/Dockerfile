@@ -1,10 +1,6 @@
-FROM --platform=linux/amd64 python:3.8-slim
+FROM python:3.8.5-slim
 ADD ./requirements.txt /requirements.txt
-
-RUN apt-get update && apt-get install -y gcc
-RUN apt-get install libssl-dev
-
-RUN pip install -U pip && pip install -r /requirements.txt
+RUN pip install -r /requirements.txt
 WORKDIR /code
 ADD * /code/
 ADD pytransform /code/pytransform
