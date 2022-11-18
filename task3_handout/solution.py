@@ -1,10 +1,8 @@
 import numpy as np
 import time
-from scipy.optimize import fmin_l_bfgs_b
 import matplotlib.pyplot as plt
-from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import Matern, ConstantKernel
+from sklearn.gaussian_process.kernels import Matern
 
 EXTENDED_EVALUATION = False
 domain = np.array([[0, 5]])
@@ -55,27 +53,29 @@ class BO_algo:
         """
         if self.unsafe_counter > 1:
             return 0
-        
+
         self.gp_f.fit(X=self.X.reshape(-1, 1), y=self.F)
         self.gp_v.fit(X=self.X.reshape(-1, 1), y=self.V)
+
+        # self.plot_stuff()
 
         next_x = self.optimize_acquisition_function()
 
         return np.atleast_2d(next_x)
 
-    def optimize_acquisition_function(self, num_points=200):
+    def optimize_acquisition_function(self, num_points=200, eps=0.001):
+        def already_tested(x):
+            t = np.any(abs(self.X.reshape(-1) - x) < eps)
+            return t
 
-        test_x = np.random.uniform(low=0, high=5, size=num_points)
-        val_x = [
-            self.acquisition_function(x, v_penalty=True)
-            for x in test_x
-            if x not in self.X
-        ]
+        test_x = np.random.uniform(0, 5, num_points)
+        test_x = [x for x in test_x if not already_tested(x)]
+        val_x = [self.acquisition_function(x, v_penalty=True) for x in test_x]
         best_x_idx = np.argmax(val_x)
 
         return test_x[best_x_idx]
 
-    def acquisition_function(self, x, v_penalty=False):
+    def acquisition_function(self, x, v_penalty=True):
         """
         Compute the acquisition function.
 
@@ -92,7 +92,7 @@ class BO_algo:
         mean_f, stddev_f = self.gp_f.predict(x.reshape(-1, 1), return_std=True)
         mean_v, stddev_v = self.gp_v.predict(x.reshape(-1, 1), return_std=True)
         ucb_f = mean_f + self.beta * stddev_f
-        min_possible_v = mean_v - (2+self.unsafe_counter) * stddev_v
+        min_possible_v = mean_v - (2 + self.unsafe_counter) * stddev_v
         ucb_mod = (0.9 * ucb_f) if (min_possible_v > self.v_min) else 0.1 * ucb_f
         return ucb_mod if (v_penalty) else ucb_f
 
@@ -125,9 +125,11 @@ class BO_algo:
         solution: np.ndarray
             1 x domain.shape[0] array containing the optimal solution of the problem
         """
-        valid_f = self.F
-        valid_f[self.V < self.v_min] = -np.inf
-        optimal_x = self.X[np.argmax(valid_f)]
+        self.gp_f.fit(X=self.X.reshape(-1, 1), y=self.F)
+        self.gp_v.fit(X=self.X.reshape(-1, 1), y=self.V)
+        test_x = np.linspace(0, 5, 1000)
+        ucb = [self.acquisition_function(x).reshape(-1) for x in test_x]
+        optimal_x = test_x[np.argmax(ucb)]
 
         # print("Done!")
         # time.sleep(5)
@@ -147,9 +149,13 @@ class BO_algo:
 
         # plot f_hat_mean(blue) ucb (red) ucb_modified (green)
         plt.figure()
-        ucb = self.acquisition_function(test_x)
-        plt.plot(test_x, ucb, "r")
+        ucb = [self.acquisition_function(x).reshape(-1) for x in test_x]
+        plt.plot(test_x, ucb, "g")
+        fun_up = [pred_mean_f[i] + pred_stddev_f[i] for i in range(100)]
+        fun_down = [pred_mean_f[i] - pred_stddev_f[i] for i in range(100)]
         plt.plot(test_x, pred_mean_f, "b")
+        plt.plot(test_x, fun_up, "r")
+        plt.plot(test_x, fun_down, "r")
         plt.plot(self.X, self.F, "k+")
         plt.savefig(f"abc/plot_{self.counter:03}f.jpg")
 
