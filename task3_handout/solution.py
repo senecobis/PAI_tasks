@@ -35,7 +35,7 @@ class BO_algo:
 
         # Kernel f
         noise_f = 0.15
-        self.ker_f = Matern(length_scale=0.5, nu=2.5)
+        self.ker_f = 0.5 * Matern(length_scale=0.5, nu=2.5)
 
         # Kernel v
         noise_v = 1e-4
@@ -58,20 +58,28 @@ class BO_algo:
         self.gp_v.fit(X=self.X.reshape(-1, 1), y=self.V)
 
         # self.plot_stuff()
-
+        # if self.counter == 0:
+        #     next_x = 4
+        # elif self.counter == 1:
+        #     next_x = 1
+        # else:
         next_x = self.optimize_acquisition_function()
 
-        return np.array(next_x).reshape(1, 1)
+        return np.atleast_2d(next_x)
 
     def optimize_acquisition_function(self, num_points=200):
 
         test_x = np.random.uniform(low=0, high=5, size=num_points)
-        val_x = self.acquisition_function(test_x)
+        val_x = [
+            self.acquisition_function(x, v_penalty=True)
+            for x in test_x
+            if x not in self.X
+        ]
         best_x_idx = np.argmax(val_x)
 
         return test_x[best_x_idx]
 
-    def acquisition_function(self, x):
+    def acquisition_function(self, x, v_penalty=False):
         """
         Compute the acquisition function.
 
@@ -85,29 +93,12 @@ class BO_algo:
         af_value: float
             Value of the acquisition function at x
         """
-
-        def objective(f_mean, f_std, v_mean, v_std, v_penalty=True):
-            ucb_f = f_mean + self.beta * f_std
-            min_possible_v = v_mean - 2 * v_std
-            ucb_mod = (0.9 * ucb_f) if (min_possible_v > self.v_min) else 0.1 * ucb_f
-            return ucb_mod if (v_penalty) else ucb_f
-
-        pred_mean_f, pred_stddev_f = self.gp_f.predict(
-            x.reshape(-1, 1), return_std=True
-        )
-        pred_mean_v, pred_stddev_v = self.gp_v.predict(
-            x.reshape(-1, 1), return_std=True
-        )
-
-        return [
-            objective(
-                f_mean=pred_mean_f[i],
-                f_std=pred_stddev_f[i],
-                v_mean=pred_mean_v[i],
-                v_std=pred_stddev_v[i],
-            )
-            for i in range(len(pred_mean_f))
-        ]
+        mean_f, stddev_f = self.gp_f.predict(x.reshape(-1, 1), return_std=True)
+        mean_v, stddev_v = self.gp_v.predict(x.reshape(-1, 1), return_std=True)
+        ucb_f = mean_f + self.beta * stddev_f
+        min_possible_v = mean_v - 2 * stddev_v
+        ucb_mod = (0.9 * ucb_f) if (min_possible_v > self.v_min) else 0.1 * ucb_f
+        return ucb_mod if (v_penalty) else ucb_f
 
     def add_data_point(self, x, f, v):
         """
