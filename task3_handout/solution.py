@@ -6,7 +6,6 @@ from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, ConstantKernel, WhiteKernel
 
-EXTENDED_EVALUATION = False
 domain = np.array([[0, 5]])
 np.random.seed(0)
 
@@ -17,62 +16,33 @@ class BO_algo():
     def __init__(self):
         """Initializes the algorithm with a parameter configuration. """
 
+        """Initializes the algorithm with a parameter configuration."""
+
         def warn(*args, **kwargs):
             pass
         import warnings
         warnings.warn = warn
 
-        # plottings variables
-        self.selected_x = []
-        self.selected_y = []
-        self.selected_v = []
-        self.perc_of_unsafe_eval = 0
-        
+        # General initializations
+        self.beta = 2
+        self.v_min = 1.2
+        self.counter = 0
+        self.unsafe_counter = 0
+        self.X = np.empty((0, 1))
+        self.F = np.empty((0, 1))
+        self.V = np.empty((0, 1))
+
         # Kernel f
-        self.var_f = 0.5
-        self.len_scale_f = 0.5
-        self.nu_f = 2.5
-        self.ker_f = self.var_f*Matern(length_scale=self.len_scale_f, nu=self.nu_f)
+        noise_f = 0.15
+        self.ker_f = 0.5 * Matern(length_scale=0.5, nu=2.5)
 
         # Kernel v
-        self.mean_v = 1.5
-        self.var_v = np.sqrt(2)
-        self.len_scale_v = 0.5
-        self.nu_v = 2.5
-        self.ker_v = self.var_v*Matern(length_scale=self.len_scale_v, nu=self.nu_v)+ConstantKernel(constant_value=self.mean_v)
+        noise_v = 1e-4
+        self.ker_v = np.sqrt(2) * Matern(length_scale=0.5, nu=2.5) + 1.5
 
-        # General initializations
-        self.v_min = 1.2
-        self.beta = 5
-        self.X = np.empty((0,1))
-        self.f = np.empty((0,1))
-        self.V = np.empty((0,1))
-
-        self.gp_f = GaussianProcessRegressor(kernel=self.ker_f,alpha=0.001)
-        self.gp_v = GaussianProcessRegressor(kernel=self.ker_v,alpha=0.001)
-
-    def next_safe_random_point(self):
-
-        # TODO: add the possibility to do unsafe eval but less then 5 percent
-        bounds = np.squeeze(domain)
-        ind=0
-        # take a point at random that is greater than the one evaluated
-        for _ in range(1000):
-            next_x = np.array([[np.random.uniform(bounds[0], bounds[-1])]])
-            if self.gp_v.predict(np.vstack(self.X, next_x)) < self.v_min:
-                print(f"random round, predicted x {next_x} \
-                    and vel {self.gp_v.predict(next_x)}")
-                ind+=1
-            else:
-                print(f"\n --- save x {next_x}\
-                        found with vel {self.gp_v.predict(next_x)}")
-
-        print(f"\n --- reinitialized {ind}\
-                times with a final vel of {self.gp_v.predict(next_x)}")
-
-        return next_x
-
-        
+        self.gp_f = GaussianProcessRegressor(kernel=self.ker_f, alpha=noise_f**2)
+        self.gp_v = GaussianProcessRegressor(kernel=self.ker_v, alpha=noise_v**2)
+    
 
     def next_recommendation(self):
         """
@@ -88,16 +58,25 @@ class BO_algo():
         # - Predict next point optimazing our a(x) function
         # if the evaluation is unsafe then take a point at random
 
+        if self.unsafe_counter > 1:
+            return 0
+
+        self.gp_f.fit(X=self.X.reshape(-1, 1), y=self.F)
+        self.gp_v.fit(X=self.X.reshape(-1, 1), y=self.V)
+
         next_x = self.optimize_acquisition_function()
-        corresponding_v = self.gp_v.predict(next_x)
-        
+        corresponding_v = self.gp_v.predict(np.array(next_x).reshape(-1, 1))
+
         if corresponding_v < self.v_min:
-            print(f"\n unsafe next point {next_x} with velocity {corresponding_v}")
-            #next_x = self.next_safe_random_point()
-        return next_x
+            while corresponding_v < self.v_min:
+                print(f"\n unsafe point {next_x} with velocity {corresponding_v}")        
+                next_x = np.random.uniform(0, 5)
+                corresponding_v = self.gp_v.predict(np.array(next_x).reshape(-1, 1))   
+
+        return np.atleast_2d(next_x)
 
 
-    def optimize_acquisition_function(self):
+    def optimize_acquisition_function(self, random_points=True, num_points=200, eps=0.001):
         """
         Optimizes the acquisition function.
 
@@ -106,16 +85,28 @@ class BO_algo():
         x_opt: np.ndarray
             1 x domain.shape[0] array containing the point that maximize the acquisition function.
         """
+        if not random_points:
+            x_values = np.linspace(domain[:, 0], domain[:, 1], num=num_points)
+            f_values = np.zeros(x_values.shape)
+            for i, x in enumerate(x_values):
+                f_values[i] = self.acquisition_function(x)
+            ind = np.argmax(f_values)
+            return np.atleast_2d(x_values[ind])
+        else:
+            def already_tested(x):
+                t = np.any(abs(self.X.reshape(-1) - x) < eps)
+                return t
 
-        x_values = np.linspace(domain[:, 0], domain[:, 1], num=1000)
-        f_values = np.zeros(x_values.shape)
-        for i, x in enumerate(x_values):
-            f_values[i] = self.acquisition_function(x)
-        ind = np.argmax(f_values)
-        return np.atleast_2d(x_values[ind])
+            test_x = np.random.uniform(0, 5, num_points)
+            test_x = [x for x in test_x if not already_tested(x)]
+            val_x = [self.acquisition_function(x, v_penalty=True) for x in test_x]
+            best_x_idx = np.argmax(val_x)
+
+            return test_x[best_x_idx]
 
 
-    def acquisition_function(self, x, method="UCB"):
+
+    def acquisition_function(self, x, v_penalty=True, method="UCB"):
         """
         Compute the acquisition function.
 
@@ -130,36 +121,59 @@ class BO_algo():
             Value of the acquisition function at x
         """
         if method == "UCB":
-            self.gp_f.fit(self.X, self.f)
-            self.gp_v.fit(self.X, self.V)
-            pred_mean_f, pred_stddev_f = self.gp_f.predict(x[np.newaxis,:], return_std=True)
-            return (pred_mean_f + self.beta * pred_stddev_f).squeeze() 
+            mean_f, stddev_f = self.gp_f.predict(x.reshape(-1, 1), return_std=True)
+            mean_v, stddev_v = self.gp_v.predict(x.reshape(-1, 1), return_std=True)
+            ucb_f = mean_f + self.beta * stddev_f
+            min_possible_v = mean_v - (2 + self.unsafe_counter) * stddev_v
+            ucb_mod = (0.9 * ucb_f) if (min_possible_v > self.v_min) else 0.1 * ucb_f
+            return ucb_mod if (v_penalty) else ucb_f
 
-        elif method == "EI":
-            # de-mean data?
-            
-            #two strategies for picking t possible
-            # a) t is minimum over previous observations
-            # b) t is minimum of expected value of the objective
-            if self.t_choice == 'observations':
-                t = np.array(self.previous_points)[:,2].min()
-            elif self.t_choice == 'expectation':
-                t = self.objective_model.predict(self.theta_sample).min()
-            
-            # constraint
-            c_mean, c_std = self.constraint_model.predict(np.atleast_2d(x), return_std=True)
-            prob_constraint = norm.cdf(0, loc=c_mean, scale=c_std)
-            
-            # objective
-            y_mean, y_std = self.objective_model.predict(np.atleast_2d(x), return_std=True)
-            z_x = (t - y_mean - self.xi)/y_std
+        elif method == "EI": 
+            ei = self.expected_improvement(x, eps=0.015)
+            constraint_weight = self.constraint_function(x)
+            af_value = float(ei * constraint_weight)
+            return af_value
 
-            ei_x =  y_std *(z_x * norm.cdf(z_x) + norm.pdf(z_x))
-            
-            return prob_constraint * ei_x
 
-        #return ucb_f.squeeze()
- 
+    def expected_improvement(self, x, eps=0.01):
+        """
+        Compute expected improvement at points x based on samples x_samples
+        and y_samples using Gaussian process surrogate
+        Args:
+            x: Points at which EI should be computed
+            eps: Exploitation-exploration trade-off parameter
+        """
+
+        mean_f, stddev_f = self.gp_f.predict(x.reshape(-1, 1), return_std=True)
+        mean_F = self.gp_f.predict(self.X)
+
+        stddev_f = stddev_f.reshape(-1, 1)
+        mean_sample_opt = np.max(mean_F)
+        with np.errstate(divide="warn"):
+            imp = mean_f - mean_sample_opt - eps
+            Z = imp / stddev_f
+            ei = imp * norm.cdf(Z) + stddev_f * norm.pdf(Z)
+            ei[stddev_f == 0.0] = 0.0
+
+        return ei
+
+
+    def constraint_function(self, x):
+        """
+        https://arxiv.org/abs/1403.5607
+        """
+
+        # predict distribution of speed v
+        mean_v, stddev_v = self.gp_v.predict(x.reshape(-1, 1), return_std=True)
+
+        # Gaussian CDF with params from GPR prediction
+        if stddev_v != 0:
+            pr = 1 - norm.cdf(self.v_min, loc=mean_v, scale=stddev_v)
+        else:
+            pr = 0.98 * (mean_v - self.v_min) if mean_v >= self.v_min else 0.02 * (self.v_min - mean_v)
+
+        return pr
+           
 
     def add_data_point(self, x, f, v):
         """
@@ -174,16 +188,17 @@ class BO_algo():
         v: np.ndarray
             Model training speed
         """
-        self.selected_x.append(int(x.squeeze()))
-        self.selected_y.append(int(f.squeeze()))
-       #self.selected_v.append(int(v.squeeze()))
+        self.counter += 1
+        if v < self.v_min:
+            self.unsafe_counter += 1
+            print(f"num of unsafe {self.unsafe_counter}")
 
         self.X = np.vstack((self.X, x))
-        self.f = np.vstack((self.f, f))
+        self.F = np.vstack((self.F, f))
         self.V = np.vstack((self.V, v))
 
 
-    def get_solution(self):
+    def get_solution(self, num_points=1000):
         """
         Return x_opt that is believed to be the maximizer of f.
 
@@ -192,27 +207,23 @@ class BO_algo():
         solution: np.ndarray
             1 x domain.shape[0] array containing the optimal solution of the problem
         """
-        valid_f = self.f
-        #valid_f[self.V < self.v_min] = -1e6 #shorthand for -np.inf
-        optmal_x = self.X[np.argmax(valid_f)]
 
-        print(f"Selected {len(self.selected_x)} points: {self.selected_x} \n \
-                and corresponding accuracies: {self.selected_y} \n \
-                and velocity {self.V}")
+        self.gp_f.fit(X=self.X.reshape(-1, 1), y=self.F)
+        self.gp_v.fit(X=self.X.reshape(-1, 1), y=self.V)
+
+        x_values = np.linspace(domain[:, 0], domain[:, 1], num=num_points)
+        f_values = np.zeros(x_values.shape)
+
+        for i, x in enumerate(x_values):
+            if self.gp_v.predict(x.reshape(-1, 1)) < 1.2:
+                f_values[i] = -np.inf
+            else:
+                f_values[i] = self.gp_f.predict(x.reshape(-1, 1))
+        optimal_x = x_values[np.argmax(f_values)]
         
-        #plt.plot(self.X, color='black')
-        #plt.plot(self.f, color='red')
-        #plt.plot(self.V, color='blue')
-        #plt.show()
-        #plt.savefig(f'{os.getcwd()}/images/x_points_{self.index}.png')
-        #plt.savefig(f'x_points_{self.index}.png')
-
-
-        self.index += 1
-
-        return optmal_x
-        
-
+        return optimal_x
+    
+    
 """ Toy problem to check code works as expected """
 
 def check_in_domain(x):
