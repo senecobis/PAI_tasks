@@ -53,16 +53,12 @@ class BO_algo:
         recommendation: np.ndarray
             1 x domain.shape[0] array containing the next point to evaluate
         """
-
+        if self.unsafe_counter > 1:
+            return 0
+        
         self.gp_f.fit(X=self.X.reshape(-1, 1), y=self.F)
         self.gp_v.fit(X=self.X.reshape(-1, 1), y=self.V)
 
-        # self.plot_stuff()
-        # if self.counter == 0:
-        #     next_x = 4
-        # elif self.counter == 1:
-        #     next_x = 1
-        # else:
         next_x = self.optimize_acquisition_function()
 
         return np.atleast_2d(next_x)
@@ -96,7 +92,7 @@ class BO_algo:
         mean_f, stddev_f = self.gp_f.predict(x.reshape(-1, 1), return_std=True)
         mean_v, stddev_v = self.gp_v.predict(x.reshape(-1, 1), return_std=True)
         ucb_f = mean_f + self.beta * stddev_f
-        min_possible_v = mean_v - 2 * stddev_v
+        min_possible_v = mean_v - (2+self.unsafe_counter) * stddev_v
         ucb_mod = (0.9 * ucb_f) if (min_possible_v > self.v_min) else 0.1 * ucb_f
         return ucb_mod if (v_penalty) else ucb_f
 
@@ -114,6 +110,8 @@ class BO_algo:
             Model training speed
         """
         self.counter += 1
+        if v < self.v_min:
+            self.unsafe_counter += 1
         self.X = np.vstack((self.X, x))
         self.F = np.vstack((self.F, f))
         self.V = np.vstack((self.V, v))
