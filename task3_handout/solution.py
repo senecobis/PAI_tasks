@@ -24,37 +24,25 @@ class BO_algo:
 
         warnings.warn = warn
 
-        # Kernel f
-        self.var_f = 0.5
-        self.len_scale_f = 0.5
-        self.nu_f = 2.5
-        self.noise_f = 0.15
-        self.ker_f = Matern(length_scale=self.len_scale_f, nu=self.nu_f)
-
-        # Kernel v
-        self.mean_v = 1.5
-        self.var_v = np.sqrt(2)
-        self.len_scale_v = 0.5
-        self.nu_v = 2.5
-        self.noise_v = 1e-4
-        self.ker_v = Matern(length_scale=self.len_scale_v, nu=self.nu_v) + self.mean_v
-
-        # GP parameters
-        # self.gen_rand = False
-        # self.sigma_f = 0.15
-        # self.sigma_v = 0.0001
-        # self.restart = 0
-        # length_scale_bounds=(1e-10, 100000.0)
-
         # General initializations
-        self.v_min = 1.2
         self.beta = 2
+        self.v_min = 1.2
+        self.counter = 0
+        self.unsafe_counter = 0
         self.X = np.empty((0, 1))
         self.F = np.empty((0, 1))
         self.V = np.empty((0, 1))
 
-        self.gp_f = GaussianProcessRegressor(kernel=self.ker_f, alpha=self.noise_f**2)
-        self.gp_v = GaussianProcessRegressor(kernel=self.ker_v, alpha=self.noise_v**2)
+        # Kernel f
+        noise_f = 0.15
+        self.ker_f = Matern(length_scale=0.5, nu=2.5)
+
+        # Kernel v
+        noise_v = 1e-4
+        self.ker_v = np.sqrt(2) * Matern(length_scale=0.5, nu=2.5) + 1.5
+
+        self.gp_f = GaussianProcessRegressor(kernel=self.ker_f, alpha=noise_f**2)
+        self.gp_v = GaussianProcessRegressor(kernel=self.ker_v, alpha=noise_v**2)
 
     def next_recommendation(self):
         """
@@ -66,10 +54,10 @@ class BO_algo:
             1 x domain.shape[0] array containing the next point to evaluate
         """
 
-        # self.plot_stuff()
-
         self.gp_f.fit(X=self.X.reshape(-1, 1), y=self.F)
         self.gp_v.fit(X=self.X.reshape(-1, 1), y=self.V)
+
+        # self.plot_stuff()
 
         next_x = self.optimize_acquisition_function()
 
@@ -77,8 +65,7 @@ class BO_algo:
 
     def optimize_acquisition_function(self, num_points=200):
 
-        test_x = np.linspace(start=0, stop=5, num=num_points)
-        test_x = np.array([y for y in test_x if y not in self.X])
+        test_x = np.random.uniform(low=0, high=5, size=num_points)
         val_x = self.acquisition_function(test_x)
         best_x_idx = np.argmax(val_x)
 
@@ -101,26 +88,26 @@ class BO_algo:
 
         def objective(f_mean, f_std, v_mean, v_std, v_penalty=True):
             ucb_f = f_mean + self.beta * f_std
-            v_penalty = (
-                2 * ucb_f if (v_mean - v_std < self.v_min and v_penalty) else 0.0
-            )
-            return ucb_f - v_penalty
+            min_possible_v = v_mean - 2 * v_std
+            ucb_mod = (0.9 * ucb_f) if (min_possible_v > self.v_min) else 0.1 * ucb_f
+            return ucb_mod if (v_penalty) else ucb_f
 
-        pred_mean_v, pred_stddev_v = self.gp_v.predict(
-            x.reshape(-1, 1), return_std=True
-        )
         pred_mean_f, pred_stddev_f = self.gp_f.predict(
             x.reshape(-1, 1), return_std=True
         )
+        pred_mean_v, pred_stddev_v = self.gp_v.predict(
+            x.reshape(-1, 1), return_std=True
+        )
 
-        acquisition_val = [
+        return [
             objective(
-                pred_mean_f[i], pred_stddev_f[i], pred_mean_v[i], pred_stddev_v[i]
+                f_mean=pred_mean_f[i],
+                f_std=pred_stddev_f[i],
+                v_mean=pred_mean_v[i],
+                v_std=pred_stddev_v[i],
             )
             for i in range(len(pred_mean_f))
         ]
-
-        return acquisition_val
 
     def add_data_point(self, x, f, v):
         """
@@ -135,7 +122,7 @@ class BO_algo:
         v: np.ndarray
             Model training speed
         """
-        # print(np.around(self.X.reshape((-1)), decimals=2))
+        self.counter += 1
         self.X = np.vstack((self.X, x))
         self.F = np.vstack((self.F, f))
         self.V = np.vstack((self.V, v))
@@ -153,9 +140,13 @@ class BO_algo:
         valid_f[self.V < self.v_min] = -np.inf
         optimal_x = self.X[np.argmax(valid_f)]
 
+        # print("Done!")
+        # time.sleep(5)
+
         return optimal_x
 
     def plot_stuff(self):
+        print(f"plotting {self.counter:03}")
         test_x = np.linspace(start=0, stop=5, num=100)
 
         pred_mean_f, pred_stddev_f = self.gp_f.predict(
@@ -167,18 +158,11 @@ class BO_algo:
 
         # plot f_hat_mean(blue) ucb (red) ucb_modified (green)
         plt.figure()
-        id = np.random.randint(0, 100)
-        print(f"plotting {id}")
-        ucb_normal = [pred_mean_f[i] + self.beta * pred_stddev_f[i] for i in range(100)]
-        ucb_mod = [
-            ucb_normal[i] if pred_mean_v[i] - pred_stddev_v[i] > self.v_min else 0
-            for i in range(100)
-        ]
-        plt.plot(test_x, ucb_normal, "r")
-        plt.plot(test_x, ucb_mod, "g")
+        ucb = self.acquisition_function(test_x)
+        plt.plot(test_x, ucb, "r")
         plt.plot(test_x, pred_mean_f, "b")
         plt.plot(self.X, self.F, "k+")
-        plt.savefig(f"abc/plot_f{id}.jpg")
+        plt.savefig(f"abc/plot_{self.counter:03}f.jpg")
 
         # plot velocity + uncertainty
         plt.figure()
@@ -188,9 +172,7 @@ class BO_algo:
         plt.plot(test_x, vel_up, "r")
         plt.plot(test_x, vel_down, "r")
         plt.plot(self.X, self.V, "k+")
-        plt.savefig(f"abc/plot_v{id}.jpg")
-
-        time.sleep(3)
+        plt.savefig(f"abc/plot_{self.counter:03}v.jpg")
 
 
 """ Toy problem to check code works as expected """
