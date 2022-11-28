@@ -286,6 +286,7 @@ class VPGBuffer:
 
         # TODO: Implement TD residuals calculation.
         # Hint: use the discount_cumsum function
+
         res_TD = rews[:-1] + self.gamma *  vals[1:] - vals[:-1]
         self.tdres_buf[path_slice] = discount_cumsum(res_TD, self.gamma * self.lam)
 
@@ -324,11 +325,14 @@ class VPGBuffer:
 class Agent:
     def __init__(self, env, activation=nn.Tanh):
         self.env = env
-        self.hid = 64  # layer width of networks
-        self.l = 2  # layer number of networks
+        ###### don't change this parameters they are optimal ####
+        self.hid = 110  # layer width of networks
+        self.l = 3 # layer number of networks
+        #########################################################
         hidden_sizes = [self.hid] * self.l
         obs_dim = 8
-        self.actor = Actor(obs_dim, 4, hidden_sizes, activation)
+        act_dim = 4
+        self.actor = Actor(obs_dim, act_dim, hidden_sizes, activation)
         self.critic = Critic(obs_dim, hidden_sizes, activation)
 
     def step(self, state):
@@ -414,7 +418,7 @@ def train(env, seed=0):
     # Number of training steps per epoch
     steps_per_epoch = 3000
     # Number of epochs to train for
-    epochs = 65 #50
+    epochs = 50 #50
     # The longest an episode can go on before cutting it off
     max_ep_len = 300
     # Discount factor for weighting future rewards
@@ -431,11 +435,15 @@ def train(env, seed=0):
     # Initialize the ADAM optimizer using the parameters
     # of the actor and then critic networks
     # TODO: Use these optimizers later to update the actor and critic networks.
-    actor_optimizer = Adam(agent.actor.parameters(), lr=actor_lr)
-    critic_optimizer = Adam(agent.critic.parameters(), lr=critic_lr)
+    # NO weight_decay since it is solution worstening
+    actor_optimizer = Adam(agent.actor.parameters(), lr=actor_lr, weight_decay=0)
+    critic_optimizer = Adam(agent.critic.parameters(), lr=critic_lr, weight_decay=0)
 
     # Initialize the environment
     state, ep_ret, ep_len = agent.env.reset(), 0, 0
+
+    # loss for critic 
+    loss_function = MSELoss()
 
     # Main training loop: collect experience in env and update / log each epoch
     #epochs = 1
@@ -501,12 +509,12 @@ def train(env, seed=0):
         actor_optimizer.step()
 
         # We suggest to do 100 iterations of value function updates
-        for _ in range(100):
+        value_func_updates = 100
+        for _ in range(value_func_updates):
             critic_optimizer.zero_grad()
-            # compute a loss for the value function, call loss.backwards() and then
-            # critic_optimizer.step()
+            # compute a loss for the value function, call loss.backwards() and then critic_optimizer.step()
             pi, log_prob_val= agent.actor.forward(obs, act)
-            loss_function = MSELoss()
+            #val 
             critic_loss = loss_function(log_prob_val, ret)
             critic_loss.backward()
             critic_optimizer.step()
