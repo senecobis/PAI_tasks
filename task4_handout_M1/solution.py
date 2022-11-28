@@ -511,10 +511,9 @@ def train(env, seed=0):
         # We suggest to do 100 iterations of value function updates
         value_func_updates = 100
         for _ in range(value_func_updates):
-            critic_optimizer.zero_grad()
             # compute a loss for the value function, call loss.backwards() and then critic_optimizer.step()
+            critic_optimizer.zero_grad()
             pi, log_prob_val= agent.actor.forward(obs, act)
-            #val 
             critic_loss = loss_function(log_prob_val, ret)
             critic_loss.backward()
             critic_optimizer.step()
