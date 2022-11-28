@@ -60,7 +60,8 @@ def mlp(sizes, activation, output_activation=nn.Identity):
     # Hint: Use nn.Sequential to stack multiple layers of the network.
     layers = []
     for i in range(len(sizes) - 1):
-        act = activation if j < len(sizes)-2 else output_activation
+        #act = activation if i < len(sizes)-2 else output_activation
+        act = activation
         layers += [nn.Linear(sizes[i], sizes[i + 1]), act()]
     layers.append(output_activation())
 
@@ -94,7 +95,16 @@ class Actor(nn.Module):
         # Hint: The logits_net returns for a given observation the log
         # probabilities. You should use them to obtain a Categorical
         # distribution.
+
+        if not torch.is_tensor(obs):
+            #print(f"\nobs is not a tensor, it is {type(obs)}")
+            obs = torch.from_numpy(obs).float()
+            #print(f"\nobs casted in {type(obs)}")
+        else:
+            assert torch.is_tensor(obs)
+
         log_prob = self.logits_net(obs)
+        assert torch.is_tensor(log_prob)
         pi = Categorical(logits=log_prob)
 
         return pi
@@ -120,6 +130,8 @@ class Actor(nn.Module):
         """
 
         # TODO: Implement this function.
+        if act is None:
+            print("\n action is None")
         log_prob = pi.log_prob(act)
 
         return log_prob
@@ -373,7 +385,6 @@ class Agent:
         # TODO: Implement this function.
         # Currently, this just returns a random action.
         act = self.actor._distribution(obs).sample()
-
         return act
 
 
@@ -403,7 +414,7 @@ def train(env, seed=0):
     # Number of training steps per epoch
     steps_per_epoch = 3000
     # Number of epochs to train for
-    epochs = 50
+    epochs = 65 #50
     # The longest an episode can go on before cutting it off
     max_ep_len = 300
     # Discount factor for weighting future rewards
@@ -427,11 +438,13 @@ def train(env, seed=0):
     state, ep_ret, ep_len = agent.env.reset(), 0, 0
 
     # Main training loop: collect experience in env and update / log each epoch
+    #epochs = 1
     for epoch in range(epochs):
         ep_returns = []
         for t in range(steps_per_epoch):
             a, v, logp = agent.step(torch.as_tensor(state, dtype=torch.float32))
-            next_state, r, terminal = agent.env.transition(a)
+            #next_state, r, terminal = agent.env.transition(a)
+            next_state, r, terminal = agent.env.transition(a.item())
             ep_ret += r
             ep_len += 1
 
@@ -469,28 +482,32 @@ def train(env, seed=0):
         obs = data['obs']
         act = data['act']
         ret = data['ret']
-        tdres = data['tdres']
+        #tdres = data['tdres']
         logp = data['logp']
 
 
         # Do 1 policy gradient update
         actor_optimizer.zero_grad()  # reset the gradient in the actor optimizer
-        actor_optimizer.step()
 
         # Hint: you need to compute a 'loss' such that its derivative with respect to the actor
         # parameters is the policy gradient. Then call loss.backwards() and actor_optimizer.step()
         # loss_actor =
+
+        _, logp = agent.actor.forward(obs, act)
+        tdres = Variable(data["tdres"].squeeze())
+
         loss_actor = -(logp*tdres).mean()
         loss_actor.backward()
+        actor_optimizer.step()
 
         # We suggest to do 100 iterations of value function updates
         for _ in range(100):
             critic_optimizer.zero_grad()
             # compute a loss for the value function, call loss.backwards() and then
             # critic_optimizer.step()
-            val = agent.actor.forward(data["obs"])
+            pi, log_prob_val= agent.actor.forward(obs, act)
             loss_function = MSELoss()
-            critic_loss = loss_function(val, ret)
+            critic_loss = loss_function(log_prob_val, ret)
             critic_loss.backward()
             critic_optimizer.step()
 
