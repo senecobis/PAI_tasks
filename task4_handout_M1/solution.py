@@ -60,8 +60,8 @@ def mlp(sizes, activation, output_activation=nn.Identity):
     # Hint: Use nn.Sequential to stack multiple layers of the network.
     layers = []
     for i in range(len(sizes) - 1):
-        #act = activation if i < len(sizes)-2 else output_activation
-        act = activation
+        act = activation if i < len(sizes)-2 else output_activation
+        #act = activation
         layers += [nn.Linear(sizes[i], sizes[i + 1]), act()]
     layers.append(output_activation())
 
@@ -326,8 +326,8 @@ class Agent:
     def __init__(self, env, activation=nn.Tanh):
         self.env = env
         ###### don't change this parameters they are optimal ####
-        self.hid = 110  # layer width of networks
-        self.l = 3 # layer number of networks
+        self.hid = 64 #110  # layer width of networks
+        self.l =  2 #3 # layer number of networks
         #########################################################
         hidden_sizes = [self.hid] * self.l
         obs_dim = 8
