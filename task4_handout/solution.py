@@ -57,12 +57,12 @@ def mlp(sizes, activation, output_activation=nn.Identity):
     # TODO: Implement this function.
     # Hint: Use nn.Sequential to stack multiple layers of the network.
     layers = []
-    """for i in range(len(sizes) - 1):
-        act = activation if i < len(sizes)-2 else output_activation
-        layers += [nn.Linear(sizes[i], sizes[i+1]), act()]"""
     for i in range(len(sizes) - 1):
+        act = activation if i < len(sizes)-2 else output_activation
+        layers += [nn.Linear(sizes[i], sizes[i+1]), act()]
+    """for i in range(len(sizes) - 1):
         layers += [nn.Linear(sizes[i], sizes[i + 1]), activation()]
-    layers.append(output_activation())
+    layers.append(output_activation())"""
 
     return nn.Sequential(*layers)
 
@@ -318,8 +318,8 @@ class VPGBuffer:
 class Agent:
     def __init__(self, env, activation=nn.Tanh):
         self.env = env
-        self.hid = 64  # layer width of networks
-        self.l = 2  # layer number of networks
+        self.hid = 110 #64  # layer width of networks
+        self.l = 3 #2  # layer number of networks
         hidden_sizes = [self.hid] * self.l
         obs_dim = 8
         self.actor = Actor(obs_dim, 4, hidden_sizes, activation)
